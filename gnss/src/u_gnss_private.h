@@ -208,8 +208,10 @@ typedef struct {
                        int32_t longitudeX1e7,
                        int32_t altitudeMillimetres,
                        int32_t radiusMillimetres,
+                       int32_t altitudeUncertaintyMillimetres,
                        int32_t speedMillimetresPerSecond,
                        int32_t svs,
+                       int32_t pDopX1e2,
                        int64_t timeUtc);
     int32_t measurementPeriodMs; /**< set to -1 of nothing to restore. */
     int32_t navigationCount;     /**< set to -1 of nothing to restore. */

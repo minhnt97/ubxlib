@@ -146,7 +146,8 @@ static int32_t posDecode(char *pMessage,
                          int32_t *pRadiusMillimetres,
                          int32_t *pAltitudeUncertaintyMillimetres,
                          int32_t *pSpeedMillimetresPerSecond,
-                         int32_t *pSvs, int64_t *pTimeUtc, bool printIt)
+                         int32_t *pSvs, int64_t *pTimeUtc, int32_t *pDopX1e2,
+                         bool printIt)
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
     int32_t months;
@@ -242,6 +243,13 @@ static int32_t posDecode(char *pMessage,
         if (pSpeedMillimetresPerSecond != NULL) {
             *pSpeedMillimetresPerSecond = y;
         }
+        y = (int32_t) uUbxProtocolUint16Decode(pMessage + 76);
+        if (printIt) {
+            uPortLog("U_GNSS_POS: pDOP = %f.\n", (float)y/100);
+        }
+        if (pDopX1e2 != NULL) {
+            *pDopX1e2 = y;
+        }
         errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
         //lint -restore
     }
@@ -273,7 +281,7 @@ static int32_t posGet(uGnssPrivateInstance_t *pInstance,
                               pRadiusMillimetres,
                               pAltitudeUncertaintyMillimetres,
                               pSpeedMillimetresPerSecond,
-                              pSvs, pTimeUtc, printIt);
+                              pSvs, pTimeUtc, NULL, printIt);
     } else {
         if (errorCode >= 0) {
             errorCode = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
@@ -368,6 +376,7 @@ static void messageCallback(uDeviceHandle_t gnssHandle,
     int32_t altitudeUncertaintyMillimetres = 0;
     int32_t speedMillimetresPerSecond = INT_MIN;
     int32_t svs = -1;
+    int32_t pDopX1e2 = -1;
     int64_t timeUtc = -1;
 
     (void) pMessageId;
@@ -386,8 +395,8 @@ static void messageCallback(uDeviceHandle_t gnssHandle,
                                       &altitudeMillimetres,
                                       &radiusMillimetres,
                                       &altitudeUncertaintyMillimetres,
-                                      &speedMillimetresPerSecond,
-                                      &svs, &timeUtc, false);
+                                      &speedMillimetresPerSecond, 
+                                      &svs, &timeUtc, &pDopX1e2, false);
         // Call the callback
         // Note: there can be two handles involved here, e.g. if
         // GNSS is inside a cellular device, hence we make sure
@@ -398,8 +407,9 @@ static void messageCallback(uDeviceHandle_t gnssHandle,
                                                 longitudeX1e7,
                                                 altitudeMillimetres,
                                                 radiusMillimetres,
+                                                altitudeUncertaintyMillimetres,
                                                 speedMillimetresPerSecond,
-                                                svs,
+                                                svs, pDopX1e2,
                                                 timeUtc);
         if (errorCodeOrLength == 0) {
             // As well as the above, test the position against any
