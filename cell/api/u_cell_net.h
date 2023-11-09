@@ -148,6 +148,18 @@ extern "C" {
 # define U_CELL_NET_DEEP_SCAN_TIME_SECONDS 240
 #endif
 
+#ifndef U_CELL_NET_APN_DB_AUTHENTICATION_MODE
+/** The default authentication mode to use for an APN picked from
+ * the APN database where a username and password is required.
+ * Where a module supports automatic authentication mode, that will
+ * be used instead.  If a user has specified an authentication mode
+ * with a call to uCellNetSetAuthenticationMode(), that will be used
+ * instead; this allows the user to switch from CHAP to PAP
+ * authentication mode on APNs chosen from the AP if required.
+ */
+#define U_CELL_NET_APN_DB_AUTHENTICATION_MODE U_CELL_NET_AUTHENTICATION_MODE_CHAP
+#endif
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -237,6 +249,13 @@ typedef enum {
                                     u-blox modules. */
     U_CELL_NET_RAT_CATM1 = 10,
     U_CELL_NET_RAT_NB1 = 11,
+    U_CELL_NET_RAT_GSM_UMTS = 12, /**< this dual-RAT is not supported by any
+                                       u-blox modules that are supported by ubxlib. */
+    U_CELL_NET_RAT_GSM_UMTS_LTE = 13, /**< this tri-RAT is not supported by any
+                                           u-blox modules that are supported by ubxlib. */
+    U_CELL_NET_RAT_GSM_LTE = 14, /**< supported by LENA-R8. */
+    U_CELL_NET_RAT_UMTS_LTE = 15, /**< this dual-RAT is not supported by any u-blox
+                                       modules that are supported by ubxlib. */
     U_CELL_NET_RAT_MAX_NUM
 } uCellNetRat_t;
 
@@ -253,7 +272,18 @@ typedef enum {
 /** The possible authentication modes for the network connection.
  */
 typedef enum {
-    U_CELL_NET_AUTHENTICATION_MODE_NONE = 0,
+    U_CELL_NET_AUTHENTICATION_MODE_NONE = 0, /**< \deprecated please use #U_CELL_NET_AUTHENTICATION_MODE_NOT_SET. */
+    U_CELL_NET_AUTHENTICATION_MODE_NOT_SET = 0, /**< where a module supports automatic
+                                                     authentication mode (for example
+                                                     SARA-R5 and SARA-U201) then that will
+                                                     be used; where a module does not support
+                                                     automatic authentication mode (for example
+                                                     SARA-R4, LARA-R6 and LENA-R8) and a
+                                                     user name and password are required,
+                                                     authentication will fail: please use
+                                                     uCellNetSetAuthenticationMode() to
+                                                     choose #U_CELL_NET_AUTHENTICATION_MODE_PAP
+                                                     or #U_CELL_NET_AUTHENTICATION_MODE_CHAP. */
     U_CELL_NET_AUTHENTICATION_MODE_PAP = 1,
     U_CELL_NET_AUTHENTICATION_MODE_CHAP = 2,
     U_CELL_NET_AUTHENTICATION_MODE_AUTOMATIC = 3, /**< not supported by all module types. */
@@ -305,7 +335,18 @@ typedef struct {
  *                               case the APN database in u_cell_apn_db.h
  *                               will be used to determine a default APN.
  *                               To force an empty APN to be used, specify
- *                               "" for pApn.
+ *                               "" for pApn.  Note: if the APN is chosen
+ *                               from the APN database and that APN requires
+ *                               a username and password then, if the
+ *                               module does not aupport automatic choice
+ *                               of authentication mode (e.g. SARA-R4,
+ *                               LARA-R6 and LENA-R8 do not), the
+ *                               authentication mode set with the last
+ *                               call to uCellNetSetAuthenticationMode()
+ *                               will be used or, if that function has
+ *                               never been called,
+ *                               #U_CELL_NET_APN_DB_AUTHENTICATION_MODE
+ *                               will be used.
  * @param[in] pUsername          pointer to a string giving the user name
  *                               for PPP authentication; may be set to
  *                               NULL if no user name or password is
@@ -389,7 +430,18 @@ int32_t uCellNetRegister(uDeviceHandle_t cellHandle,
  *                               case the APN database in u_cell_apn_db.h
  *                               will be used to determine a default APN.
  *                               To force an empty APN to be used, specify
- *                               "" for pApn.
+ *                               "" for pApn.  Note: if the APN is chosen
+ *                               from the APN database and that APN requires
+ *                               a username and password then, if the
+ *                               module does not aupport automatic choice
+ *                               of authentication mode (e.g. SARA-R4,
+ *                               LARA-R6 and LENA-R8 do not), the
+ *                               authentication mode set with the last
+ *                               call to uCellNetSetAuthenticationMode()
+ *                               will be used or, if that function has
+ *                               never been called,
+ *                               #U_CELL_NET_APN_DB_AUTHENTICATION_MODE
+ *                               will be used.
  * @param[in] pUsername          pointer to a string giving the user name
  *                               for PPP authentication; may be set to
  *                               NULL if no user name or password is
@@ -775,7 +827,9 @@ int32_t uCellNetGetIpAddressStr(uDeviceHandle_t cellHandle, char *pStr);
 
 /** Return the IP addresses of the first and second DNS assigned
  * by the network.  Without a DNS the module is unable to
- * use hostnames in these API functions, only IP addresses.
+ * use hostnames in these API functions, only IP addresses.  Note
+ * that some modules do not support reading out the DNS address
+ * (e.g. LENA-R8 does not).
  *
  * @param cellHandle    the handle of the cellular instance.
  * @param v6            set this to true if IPV6 DNS addresses
@@ -808,7 +862,8 @@ int32_t uCellNetGetIpAddressStr(uDeviceHandle_t cellHandle, char *pStr);
 int32_t uCellNetGetDnsStr(uDeviceHandle_t cellHandle, bool v6,
                           char *pStrDns1, char *pStrDns2);
 
-/** Get the APN currently in use.
+/** Get the APN currently in use.  Not all modules support this
+ * (e.g. LENA-R8 does not).
  *
  * @param cellHandle  the handle of the cellular instance.
  * @param[out] pStr   a pointer to size bytes of storage into which
@@ -862,6 +917,10 @@ int32_t uCellNetGetDataCounterRx(uDeviceHandle_t cellHandle);
  */
 int32_t uCellNetResetDataCounters(uDeviceHandle_t cellHandle);
 
+/* ----------------------------------------------------------------
+ * FUNCTIONS: AUTHENTICATION MODE
+ * -------------------------------------------------------------- */
+
 /** Get the authentication mode that the module will use if a
  * user name and password is included with uCellNetConnect()
  * and uCellNetActivate().
@@ -882,16 +941,16 @@ int32_t uCellNetGetAuthenticationMode(uDeviceHandle_t cellHandle);
  * is supported then it will be the default and
  * #U_CELL_NET_AUTHENTICATION_MODE_AUTOMATIC will be returned, else
  * the default authentication mode will be
- * #U_CELL_NET_AUTHENTICATION_MODE_NONE and you must call
+ * #U_CELL_NET_AUTHENTICATION_MODE_NOT_SET and you must call
  * uCellNetSetAuthenticationMode() to set it.  If the authentication
- * mode turns out to be #U_CELL_NET_AUTHENTICATION_MODE_NONE then
+ * mode turns out to be #U_CELL_NET_AUTHENTICATION_MODE_NOT_SET then
  * you MUST call this function before you call uCellNetConnect() or
  * uCellNetActivate() with a non-NULL user name and password,
  * otherwise those functions will return an error and no connection
  * will be made.
  *
  * Note: there is no need to set the authentication mode to
- * #U_CELL_NET_AUTHENTICATION_MODE_NONE; the setting will only be
+ * #U_CELL_NET_AUTHENTICATION_MODE_NOT_SET; the setting will only be
  * applied if a username and password are in use, should they not
  * be in use then the authentiction mode will in any case be "none".
  *
