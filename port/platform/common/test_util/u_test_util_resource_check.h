@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,6 +78,15 @@ int32_t uTestUtilGetDynamicResourceCount();
 bool uTestUtilResourceCheck(const char *pPrefix,
                             const char *pErrorMarker,
                             bool printIt);
+
+/** Get the current number of failed tests; since clean-up processes
+ * are skipped when a test fails, you may call this determine
+ * whether it is worth asserting about failed resources, which only
+ * adds more noise.
+ *
+ * @return  the number of failed tests.
+ */
+size_t uTestUtilGetNumFailed();
 
 #ifdef __cplusplus
 }

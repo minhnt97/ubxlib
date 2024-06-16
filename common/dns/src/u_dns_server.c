@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 u-blox
+ * Copyright 2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,7 +92,6 @@ typedef struct {
     uint16_t NSCount;          // number of authority entries
     uint16_t ARCount;          // number of resource entries
 } uDnsHeader_t;
-
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS

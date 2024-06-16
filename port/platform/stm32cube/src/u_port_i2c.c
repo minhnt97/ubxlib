@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@
 #include "u_compiler.h" // U_ATOMIC_XXX() macros
 
 #include "u_error_common.h"
+
+#include "u_timeout.h"
 
 #include "u_port.h"
 #include "u_port_os.h"
@@ -239,11 +241,11 @@ static int32_t configureHw(I2C_TypeDef *pReg, int32_t clockHertz)
 static bool waitFlagOk(I2C_TypeDef *pReg, uint32_t flag,
                        FlagStatus status, int32_t timeoutMs)
 {
-    int32_t startTimeMs = uPortGetTickTimeMs();
+    uTimeoutStart_t timeoutStart = uTimeoutStart();
     bool wait;
 
     while ((wait = (U_PORT_HAL_I2C_GET_FLAG(pReg, flag) != status)) &&
-           (uPortGetTickTimeMs() - startTimeMs < timeoutMs)) {
+           !uTimeoutExpiredMs(timeoutStart, timeoutMs)) {
     }
 
     return !wait;
@@ -256,12 +258,13 @@ static bool waitFlagOk(I2C_TypeDef *pReg, uint32_t flag,
 static bool waitTransmitOk(I2C_TypeDef *pReg, uint32_t flag,
                            int32_t timeoutMs)
 {
-    int32_t startTimeMs = uPortGetTickTimeMs();
+    uTimeoutStart_t timeoutStart = uTimeoutStart();
     bool wait;
     bool ackFailed = false;
 
     while ((wait = (U_PORT_HAL_I2C_GET_FLAG(pReg, flag) == RESET)) &&
-           (uPortGetTickTimeMs() - startTimeMs < timeoutMs) && !ackFailed) {
+           !uTimeoutExpiredMs(timeoutStart, timeoutMs) &&
+           !ackFailed) {
         if (U_PORT_HAL_I2C_GET_FLAG(pReg, I2C_FLAG_AF) == SET) {
             // If there's been an acknowledgement failure,
             // give up in an organised way
@@ -612,7 +615,11 @@ static int32_t openI2c(int32_t i2c, int32_t pinSda, int32_t pinSdc,
                     gpioInitStruct.Pin = (1U << U_PORT_STM32F4_GPIO_PIN(pinSda)) |
                                          (1U << U_PORT_STM32F4_GPIO_PIN(pinSdc));
                     gpioInitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
-                    gpioInitStruct.Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH;
+                    // Note: we used to set the speed to LL_GPIO_SPEED_FREQ_VERY_HIGH
+                    // but that seemed to cause significant comms failures; setting
+                    // the speed to low (up to 8 MHz) is more reliable and perfectly
+                    // sufficient for what is needed here
+                    gpioInitStruct.Speed = GPIO_SPEED_FREQ_LOW;
                     gpioInitStruct.OutputType = LL_GPIO_OUTPUT_OPENDRAIN;
                     gpioInitStruct.Pull = LL_GPIO_PULL_UP;
                     // AF4 from the data sheet for the STM32F437VG
@@ -851,6 +858,47 @@ int32_t uPortI2cGetTimeout(int32_t handle)
 }
 
 // Send and/or receive over the I2C interface as a controller.
+int32_t uPortI2cControllerExchange(int32_t handle, uint16_t address,
+                                   const char *pSend, size_t bytesToSend,
+                                   char *pReceive, size_t bytesToReceive,
+                                   bool noInterveningStop)
+{
+    int32_t errorCodeOrLength = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    I2C_TypeDef *pReg;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCodeOrLength = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        // > 0 rather than >= 0 below 'cos ST number their UARTs from 1
+        if ((handle > 0) && (handle < sizeof(gI2cData) / sizeof(gI2cData[0])) &&
+            (gI2cData[handle].pReg != NULL) &&
+            ((pSend != NULL) || (bytesToSend == 0)) &&
+            ((pReceive != NULL) || (bytesToReceive == 0))) {
+            pReg = gI2cData[handle].pReg;
+            errorCodeOrLength = send(gI2cData[handle].pReg, address, pSend, bytesToSend,
+                                     gI2cData[handle].timeoutMs, noInterveningStop,
+                                     &(gI2cData[handle].ignoreBusy));
+            if ((errorCodeOrLength == 0) && noInterveningStop) {
+                // Ignore the busy flag next since we haven't sent a stop
+                gI2cData[handle].ignoreBusy = true;
+            }
+            if ((errorCodeOrLength == 0) && (pReceive != NULL)) {
+                errorCodeOrLength = receive(pReg, address, pReceive, bytesToReceive,
+                                            gI2cData[handle].timeoutMs,
+                                            &(gI2cData[handle].ignoreBusy));
+            }
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCodeOrLength;
+}
+
+/** \deprecated please use uPortI2cControllerExchange() instead. */
+// Send and/or receive over the I2C interface as a controller.
 int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
                                       const char *pSend, size_t bytesToSend,
                                       char *pReceive, size_t bytesToReceive)
@@ -888,6 +936,7 @@ int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
     return errorCodeOrLength;
 }
 
+/** \deprecated please use uPortI2cControllerExchange() instead. */
 // Perform a send over the I2C interface as a controller.
 int32_t uPortI2cControllerSend(int32_t handle, uint16_t address,
                                const char *pSend, size_t bytesToSend,

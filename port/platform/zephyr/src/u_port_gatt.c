@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,18 @@
 
 #ifdef CONFIG_BT
 
+#include <version.h>
+
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/types.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#else
 #include <zephyr/types.h>
 #include <kernel.h>
-
 #include <device.h>
+#endif
+
 #include <soc.h>
 
 #include "stddef.h"    // NULL, size_t etc.
@@ -44,9 +52,15 @@
 #include "u_port_os.h"
 #include "u_port_event_queue.h"
 
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
+#else
 #include <bluetooth/conn.h>
 #include <bluetooth/uuid.h>
 #include <bluetooth/gatt.h>
+#endif
 
 #include "string.h" // For memcpy()
 
@@ -179,7 +193,6 @@ static struct bt_conn_cb conn_callbacks = {
 
 static uPortGattGapConnStatusCallback_t pGapConnStatusCallback;
 static void *pGapConnStatusParam;
-
 
 static const struct bt_uuid_16 primaryServiceUuid   = {{BT_UUID_TYPE_16}, 0x2800};
 // not used for the moment: static const struct bt_uuid_16 secondaryServiceUuid = {{BT_UUID_TYPE_16}, 0x2801};
@@ -431,7 +444,6 @@ static void writeServiceDeclaration(struct bt_gatt_attr **ppAttr,
     *ppAttr = pAttr;
 }
 
-
 static void writeCharDeclaration(struct bt_gatt_attr **ppAttr,
                                  struct bt_gatt_chrc **ppChrc,
                                  const uPortGattCharacteristic_t *pPortChar)
@@ -576,7 +588,7 @@ static uint8_t onDiscovery(struct bt_conn *conn,
                            const struct bt_gatt_attr *attr,
                            struct bt_gatt_discover_params *params)
 {
-    uint8_t returnValue = BT_GATT_ITER_STOP;
+    uPortGattIter_t returnValue = BT_GATT_ITER_STOP;
     int32_t connHandle = findConnHandle(conn);
 
     if (connHandle != U_PORT_GATT_GAP_INVALID_CONNHANDLE) {
@@ -630,7 +642,7 @@ static uint8_t onDiscovery(struct bt_conn *conn,
         }
     }
 
-    return returnValue;
+    return (uint8_t) returnValue;
 }
 
 static int32_t startDiscovery(int32_t connHandle, const uPortGattUuid_t *pUuid,
@@ -893,20 +905,20 @@ static struct bt_conn *connectGapAsCentral(const bt_addr_le_t *pPeer, int32_t *p
     if (pGapParams == NULL) {
         createParam.interval = uPortGattGapParamsDefault.scanInterval;
         createParam.window = uPortGattGapParamsDefault.scanWindow;
-        createParam.timeout = uPortGattGapParamsDefault.createConnectionTmo / 10;
+        createParam.timeout = (uint16_t) (uPortGattGapParamsDefault.createConnectionTimeout / 10);
         connParam.interval_min = uPortGattGapParamsDefault.connIntervalMin;
         connParam.interval_max = uPortGattGapParamsDefault.connIntervalMax;
         connParam.latency = uPortGattGapParamsDefault.connLatency;
-        connParam.timeout = uPortGattGapParamsDefault.linkLossTimeout;
+        connParam.timeout = (uint16_t) uPortGattGapParamsDefault.linkLossTimeout;
     } else {
         createParam.interval = pGapParams->scanInterval;
         createParam.window = pGapParams->scanWindow;
-        createParam.timeout = pGapParams->createConnectionTmo / 10;
+        createParam.timeout = (uint16_t) (pGapParams->createConnectionTimeout / 10);
 
         connParam.interval_min = pGapParams->connIntervalMin;
         connParam.interval_max = pGapParams->connIntervalMax;
         connParam.latency = pGapParams->connLatency;
-        connParam.timeout = pGapParams->linkLossTimeout;
+        connParam.timeout = (uint16_t) pGapParams->linkLossTimeout;
     }
 
     *pErrorCode = bt_conn_le_create(pPeer, &createParam, &connParam, &pConn);

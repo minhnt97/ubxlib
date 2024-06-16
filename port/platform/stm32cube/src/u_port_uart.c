@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@
 #include "u_compiler.h" // U_ATOMIC_XXX() macros
 
 #include "u_error_common.h"
+
+#include "u_timeout.h"
 
 #include "u_port_clib_platform_specific.h" /* Integer stdio, must be included
                                               before the other port files if
@@ -1022,7 +1024,11 @@ int32_t uPortUartOpen(int32_t uart, int32_t baudRate,
                     gpioInitStruct.Pin = (1U << U_PORT_STM32F4_GPIO_PIN(pinTx)) |
                                          (1U << U_PORT_STM32F4_GPIO_PIN(pinRx));
                     gpioInitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
-                    gpioInitStruct.Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH;
+                    // Note: we used to set the speed to LL_GPIO_SPEED_FREQ_VERY_HIGH
+                    // but that seemed to cause significant comms failures; setting
+                    // the speed to low (up to 8 MHz) is more reliable and perfectly
+                    // sufficient for what is needed here
+                    gpioInitStruct.Speed = GPIO_SPEED_FREQ_LOW;
                     // Output type doesn't matter, it is overridden by
                     // the alternate function
                     gpioInitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
@@ -1309,7 +1315,7 @@ int32_t uPortUartWrite(int32_t handle,
     uPortUartData_t *pUartData;
     USART_TypeDef *pReg;
     bool txOk = true;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
 
     if (gMutex != NULL) {
 
@@ -1321,7 +1327,7 @@ int32_t uPortUartWrite(int32_t handle,
             pReg = gUartCfg[pUartData->uart].pReg;
             // Do the blocking send
             sizeOrErrorCode = (int32_t) sizeBytes;
-            startTimeMs = uPortGetTickTimeMs();
+            timeoutStart = uTimeoutStart();
             while ((sizeBytes > 0) && (txOk)) {
                 LL_USART_TransmitData8(pReg, *pDataPtr);
                 // Hint when debugging: if your code stops dead here
@@ -1333,7 +1339,8 @@ int32_t uPortUartWrite(int32_t handle,
                 // was wrong and it's not connected to the right
                 // thing.
                 while (!(txOk = LL_USART_IsActiveFlag_TXE(pReg)) &&
-                       (uPortGetTickTimeMs() - startTimeMs < U_PORT_UART_WRITE_TIMEOUT_MS)) {}
+                       !uTimeoutExpiredMs(timeoutStart,
+                                          U_PORT_UART_WRITE_TIMEOUT_MS)) {}
                 if (txOk) {
                     pDataPtr++;
                     sizeBytes--;
@@ -1342,7 +1349,8 @@ int32_t uPortUartWrite(int32_t handle,
             // Wait for transmission to complete so that we don't
             // write over stuff the next time
             while (!LL_USART_IsActiveFlag_TC(pReg) &&
-                   (uPortGetTickTimeMs() - startTimeMs < U_PORT_UART_WRITE_TIMEOUT_MS)) {}
+                   !uTimeoutExpiredMs(timeoutStart,
+                                      U_PORT_UART_WRITE_TIMEOUT_MS)) {}
             sizeOrErrorCode -= (int32_t) sizeBytes;
         }
 
@@ -1517,7 +1525,7 @@ int32_t uPortUartEventTrySend(int32_t handle, uint32_t eventBitMap,
     uErrorCode_t errorCode = U_ERROR_COMMON_NOT_INITIALISED;
     uPortUartData_t *pUartData;
     uPortUartEvent_t event;
-    int64_t startTime = uPortGetTickTimeMs();
+    uTimeoutStart_t timeoutStart = uTimeoutStart();
 
     if (gMutex != NULL) {
 
@@ -1537,7 +1545,7 @@ int32_t uPortUartEventTrySend(int32_t handle, uint32_t eventBitMap,
                                                    &event, sizeof(event));
                 uPortTaskBlock(U_CFG_OS_YIELD_MS);
             } while ((errorCode != 0) &&
-                     (uPortGetTickTimeMs() - startTime < delayMs));
+                     !uTimeoutExpiredMs(timeoutStart, delayMs));
         }
 
         U_PORT_MUTEX_UNLOCK(gMutex);

@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -320,8 +320,13 @@ int32_t uPortSpiControllerSendReceiveBlock(int32_t handle, const char *pSend,
         errorCodeOrReceiveSize = (int32_t)U_ERROR_COMMON_PLATFORM;
         if (checkOpenDevice(handle)) {
             struct spi_ioc_transfer transf = {0};
-            transf.tx_buf = (__u64)(pOutBuff ? pOutBuff : pSend);
-            transf.rx_buf = (__u64)(pInBuff ? pInBuff : pReceive);
+            // Note: these two pointers, in the spi_ioc_transfer struct,
+            // are just 64 bit unsigned integers, so some care is required
+            // in passing what has to be a pointer to a byte-wise buffer
+            // into them; specifically the uintptr_t is needed on 32-bit
+            // machines (e.g. Pi 3B+) to avoid a compiler warning
+            transf.tx_buf = (__u64)(uintptr_t)(pOutBuff ? pOutBuff : pSend);
+            transf.rx_buf = (__u64)(uintptr_t)(pInBuff ? pInBuff : pReceive);
             transf.len = (unsigned int)len;
             transf.speed_hz = (unsigned int)gSpiCfg[handle].devCfg.frequencyHertz;
             transf.bits_per_word = (unsigned char)(gSpiCfg[handle].devCfg.wordSizeBytes * 8);

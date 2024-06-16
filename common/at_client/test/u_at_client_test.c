@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -57,6 +57,7 @@
 
 #include "u_test_util_resource_check.h"
 
+#include "u_timeout.h"
 #include "u_at_client.h"
 #include "u_at_client_test.h"
 #include "u_at_client_test_data.h"
@@ -284,13 +285,13 @@ static bool atTimeoutIsObeyed(uAtClientHandle_t atClientHandle,
                               int32_t timeoutMs)
 {
     bool success = false;
-    int64_t startTime;
-    int32_t duration;
+    uTimeoutStart_t timeoutStart;
+    int32_t durationMs;
     int32_t consecutiveTimeouts;
     int32_t x;
     int32_t y;
 
-    startTime = uPortGetTickTimeMs();
+    timeoutStart = uTimeoutStart();
     uAtClientLock(atClientHandle);
     // Send nothing
     consecutiveTimeouts = gConsecutiveTimeout;
@@ -309,11 +310,11 @@ static bool atTimeoutIsObeyed(uAtClientHandle_t atClientHandle,
     uPortTaskBlock(10);
     if ((x < 0) && (y < 0) &&
         (gConsecutiveTimeout == consecutiveTimeouts + 1)) {
-        duration = (int32_t) (uPortGetTickTimeMs() - startTime);
-        if ((duration < timeoutMs) ||
-            (duration > timeoutMs + U_AT_CLIENT_TEST_AT_TIMEOUT_TOLERANCE_MS)) {
+        durationMs = uTimeoutElapsedMs(timeoutStart);
+        if ((durationMs < timeoutMs) ||
+            (durationMs > timeoutMs + U_AT_CLIENT_TEST_AT_TIMEOUT_TOLERANCE_MS)) {
             U_TEST_PRINT_LINE("AT timeout was not obeyed (%d ms as opposed"
-                              " to %d ms).", (int) duration, timeoutMs);
+                              " to %d ms).", (int) durationMs, timeoutMs);
         } else {
             success = true;
         }
@@ -937,8 +938,7 @@ int32_t uAtClientTestCheckParam(uAtClientHandle_t atClientHandle,
                 break;
             case U_AT_CLIENT_TEST_PARAMETER_RESPONSE_STRING_IGNORE_STOP_TAG:
                 ignoreStopTag = true;
-            // Deliberate fall-through
-            //lint -fallthrough
+            //fall-through
             case U_AT_CLIENT_TEST_PARAMETER_STRING:
                 z = U_AT_CLIENT_TEST_RESPONSE_BUFFER_LENGTH;
                 if (pParameter->length > 0) {
@@ -980,12 +980,10 @@ int32_t uAtClientTestCheckParam(uAtClientHandle_t atClientHandle,
                 break;
             case U_AT_CLIENT_TEST_PARAMETER_RESPONSE_BYTES_IGNORE_STOP_TAG:
                 uAtClientIgnoreStopTag(atClientHandle);
-            // Deliberate fall-through
-            //lint -fallthrough
+            //fall-through
             case U_AT_CLIENT_TEST_PARAMETER_RESPONSE_BYTES_STANDALONE:
                 standalone = true;
-            // Deliberate fall-through
-            //lint -fallthrough
+            //fall-through
             case U_AT_CLIENT_TEST_PARAMETER_BYTES:
                 z = pParameter->length;
                 if (z > U_AT_CLIENT_TEST_RESPONSE_BUFFER_LENGTH) {
@@ -1116,6 +1114,26 @@ U_PORT_TEST_FUNCTION("[atClient]", "atClientConfiguration")
     x = uAtClientTimeoutGet(atClientHandle);
     U_TEST_PRINT_LINE("timeout is now %d ms.", x);
     U_PORT_TEST_ASSERT(x == U_AT_CLIENT_DEFAULT_TIMEOUT_MS + 1);
+
+    x = uAtClientTimeoutUrcGet(atClientHandle);
+    U_TEST_PRINT_LINE("URC timeout is %d ms.", x);
+    U_PORT_TEST_ASSERT(x == U_AT_CLIENT_URC_TIMEOUT_MS);
+
+    x++;
+    uAtClientTimeoutUrcSet(atClientHandle, x);
+    x = uAtClientTimeoutUrcGet(atClientHandle);
+    U_TEST_PRINT_LINE("URC timeout is now %d ms.", x);
+    U_PORT_TEST_ASSERT(x == U_AT_CLIENT_URC_TIMEOUT_MS + 1);
+
+    x = uAtClientReadRetryDelayGet(atClientHandle);
+    U_TEST_PRINT_LINE("read retry delay is %d ms.", x);
+    U_PORT_TEST_ASSERT(x == U_AT_CLIENT_STREAM_READ_RETRY_DELAY_MS);
+
+    x++;
+    uAtClientReadRetryDelaySet(atClientHandle, x);
+    x = uAtClientReadRetryDelayGet(atClientHandle);
+    U_TEST_PRINT_LINE("read retry delay is now %d ms.", x);
+    U_PORT_TEST_ASSERT(x == U_AT_CLIENT_STREAM_READ_RETRY_DELAY_MS + 1);
 
     c = uAtClientDelimiterGet(atClientHandle);
     U_TEST_PRINT_LINE("delimiter is '%c'.", c);

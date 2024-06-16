@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -85,7 +85,17 @@ U_PORT_TEST_FUNCTION("[postamble]", "postambleResourceCheck")
                                 U_TEST_UTIL_RESOURCE_CHECK_ERROR_MARKER,
                                 true)) {
         U_TEST_PRINT_LINE("too many resources outstanding.");
-        U_PORT_TEST_ASSERT(false);
+        if (uTestUtilGetNumFailed() > 0) {
+            U_TEST_PRINT_LINE("this _might_ be because of test failures"
+                              " resulting in clean-ups being skipped but"
+                              " you MUST check.");
+        } else {
+            // Assert only if the number of failed tests is zero; this is
+            // because clean-up is inevitably skpped when a test failure
+            // occurs and so bleating about resources only adds more
+            // needless noise: of _course_ there will be leaked resources!
+            U_PORT_TEST_ASSERT(false);
+        }
     } else {
         U_TEST_PRINT_LINE("no resources outstanding.");
     }

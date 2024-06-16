@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,7 +81,6 @@ extern "C" {
  */
 # define U_WIFI_SOCK_DNS_LOOKUP_TIME_SECONDS 60
 #endif
-
 
 /** Size of receive buffer for a connected data channel
  */

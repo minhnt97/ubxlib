@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ extern "C" {
  */
 typedef struct {
     int64_t distanceMillimetres; /**< use LLONG_MIN to mean "not known". */
-    int32_t timeMs; /**< populated from uPortGetTickTimeMs(). */
+    uTimeoutStart_t timeoutStart; /**< populated from uTimeoutStart(). */
 } uGeofenceDynamicStatus_t;
 
 /** Structure to hold the maximum speed that a device will travel
@@ -162,7 +162,7 @@ int32_t uGeofenceRemove(uGeofenceContext_t **ppFenceContext,
  *                                 this means that if the radius is
  *                                 such that the position might _not_
  *                                 be inside the geofence(s) then the
- *                                 result will be callback with
+ *                                 callback will be called with
  *                                 #U_GEOFENCE_POSITION_STATE_OUTSIDE;
  *                                 for #U_GEOFENCE_TEST_TYPE_OUTSIDE
  *                                 this means that if the radius is

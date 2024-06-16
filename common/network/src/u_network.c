@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,6 +41,7 @@
 
 #include "u_port_os.h"
 #include "u_port_heap.h"
+#include "u_port_board_cfg.h"
 
 #include "u_location.h"
 #include "u_location_shared.h"
@@ -66,6 +67,16 @@
 /* ----------------------------------------------------------------
  * VARIABLES
  * -------------------------------------------------------------- */
+
+/** The sizes of the configuration structures for each network type.
+ */
+static const size_t gNetworkCfgSize[] = {
+    0,                         // U_NETWORK_TYPE_NONE
+    sizeof(uNetworkCfgBle_t),  // U_NETWORK_TYPE_BLE
+    sizeof(uNetworkCfgCell_t), // U_NETWORK_TYPE_CELL
+    sizeof(uNetworkCfgWifi_t), // U_NETWORK_TYPE_WIFI
+    sizeof(uNetworkCfgGnss_t)  // U_NETWORK_TYPE_GNSS
+};
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
@@ -132,6 +143,58 @@ static int32_t networkInterfaceChangeState(uDeviceHandle_t devHandle,
     return errorCode;
 }
 
+// Ensure that there is memory allocated, and populated, for network cfg.
+static bool cfgEnsureMemory(uDeviceNetworkData_t *pNetworkData,
+                            const void *pCfg)
+{
+    size_t cfgSize = gNetworkCfgSize[pNetworkData->networkType];
+    const uDeviceCfgUart_t *pCellUartPppSrc = NULL;
+    const uDeviceCfgUart_t *pCellUartPppDest = NULL;
+
+    if (pNetworkData->pCfg == NULL) {
+        // Allocate memory if we've not had any before
+        pNetworkData->pCfg = pUPortMalloc(cfgSize);
+        if (pNetworkData->pCfg != NULL) {
+            memset(pNetworkData->pCfg, 0, cfgSize);
+        }
+    }
+    if ((pNetworkData->pCfg != NULL) &&
+        (pNetworkData->networkType == (int32_t) U_NETWORK_TYPE_CELL) &&
+        (pCfg != NULL)) {
+        // Cellular has the pUartPpp bit also
+        pCellUartPppSrc = ((uNetworkCfgCell_t *) pCfg)->pUartPpp;
+        pCellUartPppDest = ((uNetworkCfgCell_t *) pNetworkData->pCfg)->pUartPpp;
+        if ((pCellUartPppDest != NULL) && (pCellUartPppSrc == NULL)) {
+            // If the old network configuration had a PPP UART and the
+            // new one doesn't, free the memory we had
+            uPortFree((void *) pCellUartPppDest);
+            pCellUartPppDest = NULL;
+        }
+        if ((pCellUartPppSrc != NULL) && (pCellUartPppDest == NULL)) {
+            // Need to allocate memory
+            pCellUartPppDest = (const uDeviceCfgUart_t *) pUPortMalloc(sizeof(*pCellUartPppDest));
+            if (pCellUartPppDest != NULL) {
+                memset((void *) pCellUartPppDest, 0, sizeof(*pCellUartPppDest));
+            } else {
+                // Clean up on error
+                uPortFree(pNetworkData->pCfg);
+                pNetworkData->pCfg = NULL;
+            }
+        }
+    }
+
+    if ((pNetworkData->pCfg != NULL) && (pCfg != NULL)) {
+        // If we've been given configuration data then copy it in
+        memcpy(pNetworkData->pCfg, pCfg, cfgSize);
+        if (pCellUartPppDest != NULL) {
+            memcpy((void *) pCellUartPppDest, pCellUartPppSrc, sizeof(*pCellUartPppDest));
+            ((uNetworkCfgCell_t *) pNetworkData->pCfg)->pUartPpp = pCellUartPppDest;
+        }
+    }
+
+    return (pNetworkData->pCfg != NULL);
+}
+
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -154,33 +217,38 @@ int32_t uNetworkInterfaceUp(uDeviceHandle_t devHandle,
 
     // Lock the API
     int32_t errorCode = uDeviceLock();
-    uDeviceInstance_t *pInstance;
+    uDeviceInstance_t *pDeviceInstance;
     uDeviceNetworkData_t *pNetworkData;
 
     if (errorCode == 0) {
         errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-        if ((uDeviceGetInstance(devHandle, &pInstance) == 0) &&
+        if ((uDeviceGetInstance(devHandle, &pDeviceInstance) == 0) &&
             (netType >= U_NETWORK_TYPE_NONE) &&
             (netType < U_NETWORK_TYPE_MAX_NUM)) {
-            pNetworkData = pUNetworkGetNetworkData(pInstance, netType);
+            pNetworkData = pUNetworkGetNetworkData(pDeviceInstance, netType);
             if (pNetworkData == NULL) {
                 // No network of this type has yet been brought up on
                 // this device
                 errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
-                pNetworkData = pUNetworkGetNetworkData(pInstance, U_NETWORK_TYPE_NONE);
+                pNetworkData = pUNetworkGetNetworkData(pDeviceInstance, U_NETWORK_TYPE_NONE);
             }
             if (pNetworkData != NULL) {
                 pNetworkData->networkType = (int32_t) netType;
-                errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-                if (pCfg == NULL) {
-                    // Use possible last set configuration
-                    pCfg = pNetworkData->pCfg;
-                }
-                if (pCfg != NULL) {
-                    pNetworkData->pCfg = pCfg;
-                    errorCode = networkInterfaceChangeState(devHandle, netType,
-                                                            pNetworkData->pCfg,
-                                                            true);
+                errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
+                // We potentially want to change the configuration,
+                // so allocate memory to store it here
+                // This memory is free'd when the device is closed
+                if (cfgEnsureMemory(pNetworkData, pCfg)) {
+                    // Allow the network configuration from the board
+                    // configuration of the platform to override what
+                    // we were given; only used by Zephyr
+                    errorCode = uPortBoardCfgNetwork(devHandle, netType,
+                                                     pNetworkData->pCfg);
+                    if (errorCode == 0) {
+                        errorCode = networkInterfaceChangeState(devHandle, netType,
+                                                                pNetworkData->pCfg,
+                                                                true);
+                    }
                 }
             }
         }

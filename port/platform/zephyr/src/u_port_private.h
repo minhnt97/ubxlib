@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,12 +72,19 @@ const struct device *pUPortPrivateGetGpioDevice(int32_t pin);
  *                      derived from the device tree using, e.g.
  *                      as returned by pUPortPrivateGetGpioDevice().
  * @param pinWithinPort the pin number within the GPIO device,
- *                      expected to be 0 to #GPIO_MAX_PINS_PER_PORT.
+ *                      expected to be 0 to
+ *                      uPortPrivateGetGpioPortMaxPins().
  * @return              the pin number in ubxlib terms, e.g.
  *                      as passed to pUPortPrivateGetGpioDevice().
  */
 int32_t uPortPrivateGetGpioPort(const struct device *pGpioDevice,
                                 int32_t pinWithinPort);
+
+/** Get the maximum number of pins supported by a GPIO port.
+ *
+ * @return  the maximum number of pins on a GPIO port.
+ */
+int32_t uPortPrivateGetGpioPortMaxPins();
 
 /* ----------------------------------------------------------------
  * FUNCTIONS: TIMERS

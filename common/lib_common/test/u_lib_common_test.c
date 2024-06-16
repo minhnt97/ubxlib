@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -189,7 +189,6 @@ static int32_t runLibTest(void)
 
     U_PORT_TEST_ASSERT(reloc_buf != NULL);
 
-
     uPortLog("Code currently resides @ %p, %d bytes\n", pCode, codeLen);
     uPortLog("Moving code to %p\n", reloc_buf);
     if (codeLen >= chunkSize) {
@@ -222,7 +221,6 @@ static int32_t runLibTest(void)
     U_PORT_TEST_ASSERT(libFibTestResultReloc == FIB_102);
     uPortLogF("libFibTestCalc(102):  %d\n", libFibTestResultReloc);
 
-
     libFibTestLastResultReloc = libFibTestLastRes(libHdl.ictx);
     U_PORT_TEST_ASSERT(libFibTestLastResultReloc == libFibTestResultReloc);
     uPortLogF("libFibTestLastRes:    %d\n", libFibTestLastResultReloc);
@@ -242,7 +240,6 @@ static int32_t runLibTest(void)
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS: MISC
  * -------------------------------------------------------------- */
-
 
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS: TESTS

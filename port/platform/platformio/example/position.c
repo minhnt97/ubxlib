@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@
 #include <time.h>
 
 #include "ubxlib.h"
-
 
 // Change all -1 values below to appropriate pin and settings values
 // appropriate for your module connection.
@@ -81,13 +80,13 @@ void main()
             printf("Waiting for position.");
             uLocation_t location;
             int tries = 0;
-            int64_t startTime = uPortGetTickTimeMs();
+            uTimeoutStart_t timeoutStart = uTimeoutStart();
             do {
                 printf(".");
                 errorCode = uLocationGet(deviceHandle, U_LOCATION_TYPE_GNSS,
                                          NULL, NULL, &location, NULL);
             } while (errorCode == U_ERROR_COMMON_TIMEOUT && tries++ < 4);
-            printf("\nWaited: %lld s\n", (uPortGetTickTimeMs() - startTime) / 1000);
+            printf("\nWaited: %u s\n", uTimeoutElapsedSeconds(timeoutStart));
             if (errorCode == 0) {
                 printf("Position: https://maps.google.com/?q=%d.%07d,%d.%07d\n",
                        location.latitudeX1e7 / 10000000, location.latitudeX1e7 % 10000000,

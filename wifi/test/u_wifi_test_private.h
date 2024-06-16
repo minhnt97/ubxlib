@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,7 +53,6 @@ typedef struct {
     uAtClientHandle_t atClientHandle; /**< The handle returned by uShortRangeAtClientHandleGet(). */
     uDeviceHandle_t devHandle;  /**< The u-blox device handle returned by uShortRangeOpenUart(). */
 } uWifiTestPrivate_t;
-
 
 //lint -esym(769, uWifiTestError_t::U_WIFI_TEST_ERROR_NONE)
 //lint -esym(769, uWifiTestError_t::U_WIFI_TEST_ERROR_PREAMBLE)

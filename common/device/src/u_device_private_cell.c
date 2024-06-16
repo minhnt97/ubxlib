@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@
 
 #include "u_device.h"
 #include "u_device_shared.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -79,7 +81,8 @@ static bool keepGoingCallback(uDeviceHandle_t devHandle)
     if (uDeviceGetInstance(devHandle, &pInstance) == 0) {
         pContext = (uDeviceCellContext_t *) pInstance->pContext;
         if ((pContext == NULL) ||
-            (uPortGetTickTimeMs() < pContext->stopTimeMs)) {
+            !uTimeoutExpiredMs(pContext->timeoutStop.timeoutStart,
+                               pContext->timeoutStop.durationMs)) {
             keepGoing = true;
         }
     }
@@ -132,6 +135,7 @@ static int32_t addDevice(const uDeviceCfgUart_t *pCfgUart,
 
     pContext = (uDeviceCellContext_t *) pUPortMalloc(sizeof(uDeviceCellContext_t));
     if (pContext != NULL) {
+        memset(pContext, 0, sizeof(*pContext));
         if (pCfgUart->pPrefix != NULL) {
             uPortUartPrefix(pCfgUart->pPrefix);
         }
@@ -168,8 +172,8 @@ static int32_t addDevice(const uDeviceCfgUart_t *pCfgUart,
                                      pDeviceHandle);
                 if (errorCode == 0) {
                     // Set the timeout
-                    pContext->stopTimeMs = uPortGetTickTimeMs() +
-                                           (U_DEVICE_PRIVATE_CELL_POWER_ON_GUARD_TIME_SECONDS * 1000);
+                    pContext->timeoutStop.timeoutStart = uTimeoutStart();
+                    pContext->timeoutStop.durationMs = U_DEVICE_PRIVATE_CELL_POWER_ON_GUARD_TIME_SECONDS * 1000;
                     // Remember the PWR_ON pin 'cos we need it during power down
                     pContext->pinPwrOn = pCfgCell->pinPwrOn;
                     // Hook our context data off the device handle
@@ -247,7 +251,8 @@ int32_t uDevicePrivateCellAdd(const uDeviceCfg_t *pDevCfg,
     const uDeviceCfgCell_t *pCfgCell;
 
     if ((pDevCfg != NULL) &&
-        (pDevCfg->transportType == U_DEVICE_TRANSPORT_TYPE_UART) &&
+        ((pDevCfg->transportType == U_DEVICE_TRANSPORT_TYPE_UART) ||
+         (pDevCfg->transportType == U_DEVICE_TRANSPORT_TYPE_UART_USB)) &&
         (pDeviceHandle != NULL)) {
         pCfgUart = &(pDevCfg->transportCfg.cfgUart);
         pCfgCell = &(pDevCfg->deviceCfg.cfgCell);

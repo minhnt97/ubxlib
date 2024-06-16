@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -151,6 +151,12 @@ U_WEAK void uCellMuxFree(uDeviceHandle_t cellHandle)
     (void) cellHandle;
 }
 
+U_WEAK bool uCellPppIsOpen(uDeviceHandle_t cellHandle)
+{
+    (void) cellHandle;
+    return false;
+}
+
 U_WEAK int32_t uCellCfgSetGnssProfile(uDeviceHandle_t cellHandle,
                                       int32_t profileBitMap,
                                       const char *pServerName)
@@ -172,6 +178,5 @@ U_WEAK int32_t uCellCfgGetGnssProfile(uDeviceHandle_t cellHandle,
 }
 
 // End of file
-
 
 // End of file

@@ -1,6 +1,6 @@
 
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,8 @@
 #include "u_port_heap.h"
 #include "u_port_debug.h"
 #include "u_port_event_queue.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -555,7 +557,6 @@ static void edmMqttDataCallback(int32_t edmHandle, int32_t edmChannel,
 
     U_PORT_MUTEX_UNLOCK(gMqttSessionMutex);
 }
-
 
 static void edmIpConnectionCallback(int32_t edmHandle,
                                     int32_t edmChannel,
@@ -1136,7 +1137,6 @@ int32_t uWifiMqttUnsubscribe(const uMqttClientContext_t *pContext,
     uShortRangePrivateInstance_t *pInstance;
     int32_t err = (int32_t)U_ERROR_COMMON_INVALID_PARAMETER;
 
-
     if (uShortRangeLock() == (int32_t)U_ERROR_COMMON_SUCCESS) {
 
         // Check WiFi SHO handle and MQTT session exists
@@ -1172,7 +1172,6 @@ int32_t uWifiMqttDisconnect(const uMqttClientContext_t *pContext)
 
     isMqttConnected = uWifiMqttIsConnected(pContext);
 
-
     if (uShortRangeLock() == (int32_t)U_ERROR_COMMON_SUCCESS) {
 
         // Check WiFi SHO handle and MQTT session exists
@@ -1197,7 +1196,6 @@ void uWifiMqttClose(uMqttClientContext_t *pContext)
     bool isMqttConnected;
 
     isMqttConnected = uWifiMqttIsConnected(pContext);
-
 
     if (uShortRangeLock() == (int32_t)U_ERROR_COMMON_SUCCESS) {
 
@@ -1278,7 +1276,7 @@ int32_t uWifiMqttMessageRead(const uMqttClientContext_t *pContext,
                     if (pFoundTopicStr != NULL) {
                         foundTopicLen = strlen(pFoundTopicStr);
                         if ((foundTopicLen + 1) <= topicNameSizeBytes) {
-                            strncpy(pTopicNameStr, pFoundTopicStr, foundTopicLen);
+                            strncpy(pTopicNameStr, pFoundTopicStr, topicNameSizeBytes);
                             err = (int32_t)U_ERROR_COMMON_SUCCESS;
                         }
                     }

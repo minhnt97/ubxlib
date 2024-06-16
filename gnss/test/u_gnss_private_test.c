@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -363,7 +363,6 @@ static size_t makeNmeaMessage(char *pBuffer, const char *pTalkerSentenceStr,
     *pBuffer = '\r';
     pBuffer++;
     *pBuffer = '\n';
-    pBuffer++;
 
     return size;
 }
@@ -465,7 +464,7 @@ static bool checkDecodeUbx(uRingBuffer_t *pRingBuffer, int32_t readHandle,
     int32_t errorCodeOrSize;
 
     msgId.type = U_GNSS_PROTOCOL_UBX;
-    msgId.id.ubx = (((uint16_t) messageClass) << 8) + messageId;
+    msgId.id.ubx = (uint16_t) ((((uint16_t) messageClass) << 8) + messageId);
 
     // Add pBuffer to the ring buffer and attempt to decode the message
     U_PORT_TEST_ASSERT(uRingBufferAdd(pRingBuffer, pBuffer, bufferSize));
@@ -596,7 +595,11 @@ U_PORT_TEST_FUNCTION("[gnss]", "gnssPrivateNmea")
                                                talkerSentenceBuffer, messageSize));
 
             // Then with a wrong message ID
-            strncpy(talkerSentenceBuffer, gNmeaTestMessage[x].pTalkerSentenceStr, sizeof(talkerSentenceBuffer));
+            // Note: using memcpy rather than strncpy here as GCC 8 emits a silly warning about
+            // sizeof(talkerSentenceBuffer) being the same size as the buffer otherwise.
+            z = strlen(gNmeaTestMessage[x].pTalkerSentenceStr) + 1;
+            U_PORT_TEST_ASSERT(z <= sizeof(talkerSentenceBuffer));
+            memcpy(talkerSentenceBuffer, gNmeaTestMessage[x].pTalkerSentenceStr, z);
             z = rand() % strlen(talkerSentenceBuffer);
             talkerSentenceBuffer[z] = '_';
             // Ensure terminator

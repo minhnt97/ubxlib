@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -122,12 +122,22 @@ int32_t uGnssAdd(uGnssModuleType_t moduleType,
  * should call this function to let the GNSS instance know that there
  * is such an intermediate device.  This is required because some procedures,
  * e.g. powering the GNSS device on or off, need to be done differently
- * when there is an intermediate module.  You do NOT need to call this
- * function (it will return an error) if you are using
- * #U_GNSS_TRANSPORT_AT, as the code will already know that there is an
- * intermediate module in that case.  Likewise, if you are using
+ * when there is an intermediate module.  If you are using
  * #U_GNSS_TRANSPORT_VIRTUAL_SERIAL for another reason and no
  * intermediate module is involved, you do not need to call this function.
+ *
+ * Note: we used to NOT require this function to be called when using
+ * #U_GNSS_TRANSPORT_AT since the GNSS module already knows that there is
+ * an intermediate module for that case and does not care what it is; the
+ * AT handle was all it needed.  However, then along came LENA-R8xxxM10
+ * and SARA-R520M10; these modules will return an error when AT-powered-on
+ * if all GNSS system types are requested; a specific working sub-set
+ * must be requested (all previous module types would ignore unsupported
+ * GNSS system types and indicate what they had switched on with the
+ * +UGIND URC).  For this reason it _is_ advisable to call this function,
+ * even for the AT transport case, so that the GNSS code can determine
+ * what sub-set of GNSS system types to request when turning on a GNSS
+ * module inside a cellular module.
  *
  * @param gnssHandle          the handle of the GNSS instance.
  * @param intermediateHandle  the handle of the intermediate (e.g. cellular)
@@ -179,6 +189,16 @@ void uGnssRemove(uDeviceHandle_t gnssHandle);
 
 /** Get the type and handle of the transport used by the given
  * GNSS instance.
+ *
+ * Note: where the transport is over AT (i.e. the case where AT+UGUBX
+ * messages are being used to talk to a GNSS chip that is inside or
+ * connected via a GNSS chip, e.g. if U_NETWORK_GNSS_CFG_CELL_USE_AT_ONLY
+ * is defined, or CMUX is not supported, not the normal case) it is
+ * possible for the AT handle to change underneath, so an AT handle
+ * returned by this function will be locked and therefore unusable.
+ * This will occur if a PPP session is opened to the cellular device.
+ * Should a PPP session be opened this function should be called again
+ * to obtain the correct AT handle.
  *
  * @param gnssHandle            the handle of the GNSS instance.
  * @param[out] pTransportType   a place to put the transport type,

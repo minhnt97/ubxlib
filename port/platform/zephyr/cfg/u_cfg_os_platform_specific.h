@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
    device tree. It enables use of aliases in possible user overlay files.
    Ubxlib normally uses labels like "uart1" but will through this macro always
    first check for a possible alias named "ubxlib-uart1". This applies to
-   uart, i2c and spi.
+   uart, i2c, spi and gpio.
    Overlay example:
     / {
         aliases {
@@ -48,7 +48,7 @@
  * COMPILE-TIME MACROS FOR ZEPHYR: HEAP
  * -------------------------------------------------------------- */
 
-/** /deprecated Not stricty speaking part of the OS but there's nowhere
+/** \deprecated Not stricty speaking part of the OS but there's nowhere
  * better to put this. Set this to 1 if the C library does not free memory
  * that it has alloced internally when a task is deleted.
  * For instance, newlib when it is compiled in a certain way

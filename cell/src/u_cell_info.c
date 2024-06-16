@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,8 @@
 #include "u_port_os.h"
 #include "u_port_uart.h"
 
+#include "u_timeout.h"
+
 #include "u_at_client.h"
 
 #include "u_device_shared.h"
@@ -78,6 +80,7 @@
 
 // Convert the UTRAN RSSI number in 3GPP TS 25.133 format to dBm.
 // Returns 0x7FFFFFFF if the number is not known.
+//
 // 0:     less than -100 dBm
 // 1..75: from -100 to -25 dBm with 1 dBm steps
 // 76:    -25 dBm or greater
@@ -110,43 +113,6 @@ static int32_t ecnoLevToDb(int32_t ecnoLev)
     }
 
     return ecnoDb;
-}
-
-// Get an ID string from the cellular module.
-static int32_t getString(uAtClientHandle_t atHandle,
-                         const char *pCmd, char *pBuffer,
-                         size_t bufferSize)
-{
-    int32_t errorCodeOrSize;
-    int32_t bytesRead;
-    char delimiter;
-
-    uAtClientLock(atHandle);
-    uAtClientCommandStart(atHandle, pCmd);
-    uAtClientCommandStop(atHandle);
-    // Don't want characters in the string being interpreted
-    // as delimiters
-    delimiter = uAtClientDelimiterGet(atHandle);
-    uAtClientDelimiterSet(atHandle, '\x00');
-    uAtClientResponseStart(atHandle, NULL);
-    bytesRead = uAtClientReadString(atHandle, pBuffer,
-                                    bufferSize, false);
-    uAtClientResponseStop(atHandle);
-    // Restore the delimiter
-    uAtClientDelimiterSet(atHandle, delimiter);
-    errorCodeOrSize = uAtClientUnlock(atHandle);
-    if ((bytesRead >= 0) && (errorCodeOrSize == 0)) {
-        uPortLog("U_CELL_INFO: ID string, length %d character(s),"
-                 " returned by %s is \"%s\".\n",
-                 bytesRead, pCmd, pBuffer);
-        errorCodeOrSize = bytesRead;
-    } else {
-        errorCodeOrSize = (int32_t) U_CELL_ERROR_AT;
-        uPortLog("U_CELL_INFO: unable to read ID string using"
-                 " %s.\n", pCmd);
-    }
-
-    return errorCodeOrSize;
 }
 
 // Get SINR as an integer from a decimal (e.g -13.75) in a string,
@@ -467,17 +433,35 @@ static int32_t getRadioParamsUcged2LaraR6(uAtClientHandle_t atHandle,
             pRadioParameters->cellIdPhysical = uAtClientReadInt(atHandle);
             // Skip <mTmsi>, <mmeGrId> and <mmeCode>
             uAtClientSkipParameters(atHandle, 3);
-            // RSRP is element 11, as a plain-old dBm value
+            // In the LARA-R6 00B FW RSRP (element 11) and RSRQ (element 12)
+            // are plain-old dBm values, while in the LARA-R6 01B FW they are
+            // both 3GPP coded values.  Since RSRP is negative in plain-old
+            // form and positive in 3GPP form we can, thankfully, tell the
+            // difference
             x = uAtClientReadInt(atHandle);
-            // RSRQ is element 12, as a plain-old dB value.
-            y = uAtClientReadInt(atHandle);
-            if (uAtClientErrorGet(atHandle) == 0) {
-                // Note that these last two are usually negative
-                // integers, hence we check for errors here so as
-                // not to mix up what might be a negative error
-                // code with a negative return value.
-                pRadioParameters->rsrpDbm = x;
-                pRadioParameters->rsrqDb = y;
+            if (x >= 0) {
+                // RSRP is coded as specified in TS 36.133
+                pRadioParameters->rsrpDbm = uCellPrivateRsrpToDbm(x);
+                // RSRQ is coded as specified in TS 36.133.
+                x = uAtClientReadInt(atHandle);
+                if (uAtClientErrorGet(atHandle) == 0) {
+                    // Note that this can be a negative integer, hence
+                    // we check for errors here so as not to mix up
+                    // what might be a negative error code with a
+                    // negative return value.
+                    pRadioParameters->rsrqDb = uCellPrivateRsrqToDb(x);
+                }
+            } else {
+                // RSRP and RSRQ are plain-old dB values.
+                y = uAtClientReadInt(atHandle);
+                if (uAtClientErrorGet(atHandle) == 0) {
+                    // Note that these last two are usually negative
+                    // integers, hence we check for errors here so as
+                    // not to mix up what might be a negative error
+                    // code with a negative return value.
+                    pRadioParameters->rsrpDbm = x;
+                    pRadioParameters->rsrqDb = y;
+                }
             }
             // SINR is element 13, directly in tenths of a dB, a
             // decimal number with a mantissa, 255 if unknown.
@@ -699,7 +683,7 @@ int32_t uCellInfoRefreshRadioParameters(uDeviceHandle_t cellHandle)
                     // reporting answers.
                     // Allow a little sleepy-byes here, don't want to overtask
                     // the module if this is being called repeatedly
-                    uPortTaskBlock(500);
+                    uPortTaskBlock(U_CELL_INFO_RADIO_REFRESH_DELAY_MS);
                     if (U_CELL_PRIVATE_HAS(pInstance->pModule, U_CELL_PRIVATE_FEATURE_UCGED5)) {
                         // SARA-R4 (except 422) only supports UCGED=5, and it only
                         // supports it in EUTRAN mode
@@ -714,6 +698,7 @@ int32_t uCellInfoRefreshRadioParameters(uDeviceHandle_t cellHandle)
                         // The AT+UCGED=2 formats are module-specific
                         switch (pInstance->pModule->moduleType) {
                             case U_CELL_MODULE_TYPE_SARA_R5:
+                            case U_CELL_MODULE_TYPE_SARA_R52:
                                 errorCode = getRadioParamsUcged2SaraR5(atHandle, pRadioParameters);
                                 break;
                             case U_CELL_MODULE_TYPE_SARA_R422:
@@ -1128,8 +1113,8 @@ int32_t uCellInfoGetManufacturerStr(uDeviceHandle_t cellHandle,
         pInstance = pUCellPrivateGetInstance(cellHandle);
         errorCodeOrSize = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
         if ((pInstance != NULL) && (pStr != NULL) && (size > 0)) {
-            errorCodeOrSize = getString(pInstance->atHandle, "AT+CGMI",
-                                        pStr, size);
+            errorCodeOrSize = uCellPrivateGetIdStr(pInstance->atHandle, "AT+CGMI",
+                                                   pStr, size);
         }
 
         U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
@@ -1152,8 +1137,8 @@ int32_t uCellInfoGetModelStr(uDeviceHandle_t cellHandle,
         pInstance = pUCellPrivateGetInstance(cellHandle);
         errorCodeOrSize = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
         if ((pInstance != NULL) && (pStr != NULL) && (size > 0)) {
-            errorCodeOrSize = getString(pInstance->atHandle, "AT+CGMM",
-                                        pStr, size);
+            errorCodeOrSize = uCellPrivateGetIdStr(pInstance->atHandle, "AT+CGMM",
+                                                   pStr, size);
         }
 
         U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
@@ -1177,8 +1162,8 @@ int32_t uCellInfoGetFirmwareVersionStr(uDeviceHandle_t cellHandle,
         errorCodeOrSize = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
         if ((pInstance != NULL) && (pStr != NULL) && (size > 0)) {
             // Use ATI9 instead of AT+CGMR as it contains more information
-            errorCodeOrSize = getString(pInstance->atHandle, "ATI9",
-                                        pStr, size);
+            errorCodeOrSize = uCellPrivateGetIdStr(pInstance->atHandle, "ATI9",
+                                                   pStr, size);
         }
 
         U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);

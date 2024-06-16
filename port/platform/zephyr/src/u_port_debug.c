@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,13 @@
 
 #include "u_error_common.h"
 
-#include "sys/printk.h"
+#include <version.h>
+
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/sys/printk.h>
+#else
+#include <sys/printk.h>
+#endif
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,7 +106,8 @@ static uBleTestPrivate_t gHandles = { -1, -1, NULL, NULL };
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
 
-#if defined(U_CFG_TEST_SHORT_RANGE_MODULE_TYPE) || defined(U_CFG_BLE_MODULE_INTERNAL)
+#if (defined(U_CFG_TEST_SHORT_RANGE_MODULE_TYPE) || defined(U_CFG_BLE_MODULE_INTERNAL)) && \
+    !defined(U_CFG_TEST_BLE_DISABLE_SPS)
 
 static void dataAvailableCallback(int32_t channel, void *pParameters)
 {
@@ -124,7 +125,6 @@ static void connectionCallback(int32_t connHandle, char *address, int32_t type,
     (void) mtu;
     (void) pParameters;
 }
-
 
 U_PORT_TEST_FUNCTION("[bleSps]", "bleSps")
 {
@@ -154,7 +154,6 @@ U_PORT_TEST_FUNCTION("[bleSps]", "bleSps")
 #else
 #error "Either U_CFG_TEST_SHORT_RANGE_MODULE_TYPE or U_CFG_BLE_MODULE_INTERNAL must be defined"
 #endif
-
 
     U_PORT_TEST_ASSERT(uBleSpsSetCallbackConnectionStatus(gHandles.devHandle,
                                                           connectionCallback,

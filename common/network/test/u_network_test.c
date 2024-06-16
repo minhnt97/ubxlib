@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,8 @@
 #include "u_port_spi.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #ifdef U_CFG_TEST_CELL_MODULE_TYPE
 # include "u_cell_module_type.h"
@@ -172,7 +174,6 @@ static const char gTestData[] =  "_____0000:012345678901234567890123456789012345
 // Make sure the test data is not a multiple of the MTU
 // so we test packets smaller than MTU as well as MTU sized packets
 
-
 static volatile int32_t gConnHandle;
 static volatile int32_t gBytesReceived;
 static volatile int32_t gErrors = 0;
@@ -185,7 +186,7 @@ static uPortSemaphoreHandle_t gBleConnectionSem = NULL;
 
 /** Used for keepGoingCallback() timeout.
  */
-static int64_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Keep track of the current network handle so that the
  * keepGoingCallback() can check it.
@@ -241,7 +242,6 @@ static void wrapPrint(const char *pBuffer, size_t bufLength,
             uPortLog("%c", c);
         }
     }
-    uPortLog("\n");
 }
 
 static void sendBleSps(uDeviceHandle_t devHandle)
@@ -252,13 +252,14 @@ static void sendBleSps(uDeviceHandle_t devHandle)
     while ((tries++ < 15) && (gBytesSent < gTotalBytes)) {
         // -1 to omit gTestData string terminator
         int32_t bytesSentNow =
-            uBleSpsSend(devHandle, gChannel, gTestData + testDataOffset, sizeof gTestData - 1 - testDataOffset);
+            uBleSpsSend(devHandle, gChannel, gTestData + testDataOffset,
+                        sizeof(gTestData) - 1 - testDataOffset);
 
         if (bytesSentNow >= 0) {
             gBytesSent += bytesSentNow;
             testDataOffset += bytesSentNow;
-            if (testDataOffset >= sizeof gTestData - 1) {
-                testDataOffset -= sizeof gTestData - 1;
+            if (testDataOffset >= sizeof(gTestData) - 1) {
+                testDataOffset -= sizeof(gTestData) - 1;
             }
         } else {
             U_TEST_PRINT_LINE("error sending data!!!");
@@ -301,13 +302,14 @@ static void bleSpsCallback(int32_t channel, void *pParameters)
                 gBytesReceived++;
             }
 
-            U_TEST_PRINT_LINE("received %d bytes (total %d with %d errors).",
-                              length, gBytesReceived, gErrors);
+            uPortLog(U_TEST_PREFIX "received %d bytes (total %4d with %d error(s)): ",
+                     length, gBytesReceived, gErrors);
+            wrapPrint(buffer, sizeof(buffer), 0, length);
+            uPortLog("\n");
             if (errorStartByte >= 0) {
-                U_TEST_PRINT_LINE("expected:");
-                wrapPrint(gTestData, sizeof(gTestData) - 1, previousBytesReceived, errorStartByte + 1);
-                U_TEST_PRINT_LINE("got:");
-                wrapPrint(buffer, sizeof(buffer), 0, errorStartByte + 1);
+                uPortLog(U_TEST_PREFIX "...but had expected contents: ");
+                wrapPrint(gTestData, sizeof(gTestData) - 1, previousBytesReceived, length);
+                uPortLog("\n");
             }
         }
     } while (length > 0);
@@ -346,7 +348,8 @@ static bool keepGoingCallback(uDeviceHandle_t devHandle)
     bool keepGoing = true;
 
     U_PORT_TEST_ASSERT(devHandle == gDevHandle);
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -753,7 +756,6 @@ U_PORT_TEST_FUNCTION("[network]", "networkLoc")
     const uLocationTestCfg_t *pLocationCfg;
     int32_t y;
     uLocation_t location;
-    int64_t startTime;
     int32_t resourceCount;
 
     // In case a previous test failed
@@ -800,8 +802,8 @@ U_PORT_TEST_FUNCTION("[network]", "networkLoc")
                     // Just take the first one, we don't care which as this
                     // is a network test not a location test
                     pLocationCfg = gpULocationTestCfg[pTmp->networkType]->pCfgData[0];
-                    startTime = uPortGetTickTimeMs();
-                    gStopTimeMs = startTime + U_LOCATION_TEST_CFG_TIMEOUT_SECONDS * 1000;
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_LOCATION_TEST_CFG_TIMEOUT_SECONDS * 1000;
                     uLocationTestResetLocation(&location);
                     U_TEST_PRINT_LINE("getting location using %s.",
                                       gpULocationTestTypeStr[pLocationCfg->locationType]);
@@ -811,8 +813,8 @@ U_PORT_TEST_FUNCTION("[network]", "networkLoc")
                                      pLocationCfg->pAuthenticationTokenStr,
                                      &location, keepGoingCallback);
                     if (y == 0) {
-                        U_TEST_PRINT_LINE("location establishment took %d second(s).",
-                                          (int32_t) (uPortGetTickTimeMs() - startTime) / 1000);
+                        U_TEST_PRINT_LINE("location establishment took %u second(s).",
+                                          uTimeoutElapsedSeconds(gTimeoutStop.timeoutStart));
                     }
                     // If we are running on a local cellular network we won't get position but
                     // we should always get time
@@ -1040,6 +1042,14 @@ U_PORT_TEST_FUNCTION("[network]", "networkOutage")
                                                          networkStatusCallback,
                                                          gNetworkStatusCallbackParameters) == 0);
             switch (pTmp->networkType) {
+# ifdef U_CFG_TEST_NET_STATUS_CELL
+                case U_NETWORK_TYPE_CELL:
+                    // For cellular, we have network access, so we
+                    // should be able to perform a sockets operation
+                    U_PORT_TEST_ASSERT(openSocketAndUseIt(devHandle, pTmp->networkType) == 0);
+                    break;
+# endif
+# ifdef U_CFG_TEST_NET_STATUS_SHORT_RANGE
                 case U_NETWORK_TYPE_BLE:
                     // For BLE, make a connection with our test peer
                     U_TEST_PRINT_LINE_X("connecting SPS: %s.", a, gRemoteSpsAddress);
@@ -1055,16 +1065,12 @@ U_PORT_TEST_FUNCTION("[network]", "networkOutage")
                     }
                     U_PORT_TEST_ASSERT(gConnHandle >= 0);
                     break;
-                case U_NETWORK_TYPE_CELL:
-                    // For cellular, we have network access, so we
-                    // should be able to perform a sockets operation
-                    U_PORT_TEST_ASSERT(openSocketAndUseIt(devHandle, pTmp->networkType) == 0);
-                    break;
                 case U_NETWORK_TYPE_WIFI:
                     // Nothing to do for Wi-Fi, connecting to the AP
                     // is enough; it is a local one that we can control
                     // and so does not have internet access
                     break;
+# endif
                 default:
                     break;
             }
@@ -1093,19 +1099,23 @@ U_PORT_TEST_FUNCTION("[network]", "networkOutage")
             U_PORT_TEST_ASSERT(pCallbackParameters->devHandle == *pTmp->pDevHandle);
             U_PORT_TEST_ASSERT(!pCallbackParameters->isUp);
             switch (pTmp->networkType) {
-                case U_NETWORK_TYPE_BLE:
-                    U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.pAddress == NULL);
-                    U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.status == U_BLE_SPS_DISCONNECTED);
-                    break;
+# ifdef U_CFG_TEST_NET_STATUS_CELL
                 case U_NETWORK_TYPE_CELL:
                     U_PORT_TEST_ASSERT(pCallbackParameters->status.cell.domain == (int32_t) U_CELL_NET_REG_DOMAIN_PS);
                     U_PORT_TEST_ASSERT(pCallbackParameters->status.cell.status == (int32_t)
                                        U_CELL_NET_STATUS_OUT_OF_COVERAGE);
                     break;
+# endif
+# ifdef U_CFG_TEST_NET_STATUS_SHORT_RANGE
+                case U_NETWORK_TYPE_BLE:
+                    U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.pAddress == NULL);
+                    U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.status == U_BLE_SPS_DISCONNECTED);
+                    break;
                 case U_NETWORK_TYPE_WIFI:
                     U_PORT_TEST_ASSERT(pCallbackParameters->status.wifi.pBssid == NULL);
                     U_PORT_TEST_ASSERT(pCallbackParameters->status.wifi.disconnectReason == U_WIFI_REASON_OUT_OF_RANGE);
                     break;
+# endif
                 case U_NETWORK_TYPE_GNSS:
                 default:
                     break;
@@ -1201,16 +1211,19 @@ U_PORT_TEST_FUNCTION("[network]", "networkOutage")
                     U_PORT_TEST_ASSERT(pCallbackParameters->devHandle == *pTmp->pDevHandle);
                     U_PORT_TEST_ASSERT(pCallbackParameters->isUp);
                     switch (pTmp->networkType) {
+# ifdef U_CFG_TEST_NET_STATUS_CELL
+                        case U_NETWORK_TYPE_CELL:
+                            U_PORT_TEST_ASSERT(pCallbackParameters->status.cell.domain == (int32_t) U_CELL_NET_REG_DOMAIN_PS);
+                            U_PORT_TEST_ASSERT(pCallbackParameters->status.cell.status == (int32_t)
+                                               U_CELL_NET_STATUS_REGISTERED_HOME);
+                            break;
+# endif
+# ifdef U_CFG_TEST_NET_STATUS_SHORT_RANGE
                         case U_NETWORK_TYPE_BLE:
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.pAddress != NULL);
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.status == (int32_t) U_BLE_SPS_CONNECTED);
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.channel >= 0);
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.ble.mtu > 0);
-                            break;
-                        case U_NETWORK_TYPE_CELL:
-                            U_PORT_TEST_ASSERT(pCallbackParameters->status.cell.domain == (int32_t) U_CELL_NET_REG_DOMAIN_PS);
-                            U_PORT_TEST_ASSERT(pCallbackParameters->status.cell.status == (int32_t)
-                                               U_CELL_NET_STATUS_REGISTERED_HOME);
                             break;
                         case U_NETWORK_TYPE_WIFI:
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.wifi.connId >= 0);
@@ -1219,6 +1232,7 @@ U_PORT_TEST_FUNCTION("[network]", "networkOutage")
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.wifi.channel >= 0);
                             U_PORT_TEST_ASSERT(pCallbackParameters->status.wifi.pBssid != NULL);
                             break;
+# endif
                         case U_NETWORK_TYPE_GNSS:
                         default:
                             break;

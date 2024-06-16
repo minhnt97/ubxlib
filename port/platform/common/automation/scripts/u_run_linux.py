@@ -44,6 +44,9 @@ DEVICE_REDIRECTS = []
 # to the socat utility which does the redirection
 UART_BAUD_RATE = 115200
 
+# The device name that pppd will connect (i.e. U_PORT_PPP_LOCAL_SOCKET_NAME)
+PPP_LOCAL_SOCKET_NAME = "127.0.0.1:5000"
+
 # The start marker to use on a Valgrind print
 VALGRIND_START_MARKER = "VALGRIND SAYS:"
 
@@ -100,7 +103,7 @@ def uart_to_device_list_create(u_flags, logger):
                 uart_to_device["type"] = parts[0]
                 uart_to_device["uart"] = u_cfg_test_uart_prefix + parts[1]
                 uart_to_device_list.append(uart_to_device)
-                logger.info(uart_to_device["type"] + f': will be UART ' + \
+                logger.info(uart_to_device["type"] + ': will be UART ' + \
                             uart_to_device["uart"])
         elif flag.startswith("U_CFG_APP_") and "_UART=" in flag:
             parts = flag.split("=")
@@ -116,8 +119,8 @@ def uart_to_device_list_create(u_flags, logger):
                 for uart_to_device in uart_to_device_list:
                     if uart_to_device["type"] == uart_type:
                         uart_to_device["device_to"] = parts[1]
-                        logger.info(uart_to_device["type"] + f': will be UART ' + \
-                                    uart_to_device["uart"] + f' to ' + uart_to_device["device_to"])
+                        logger.info(uart_to_device["type"] + ': will be UART ' + \
+                                    uart_to_device["uart"] + ' to ' + uart_to_device["device_to"])
                         break
     # When done, check if there were any U_CFG_APP_xxx_UART
     # entries without a corresponding U_CFG_APP_xxx_UART_DEV entry
@@ -295,7 +298,8 @@ def redirect_uart_fixed(uart_to_device_list, reporter):
                                message)
 
 def run(ctx, instance, platform, board_name=DEFAULT_BOARD_NAME, build_dir=DEFAULT_BUILD_DIR,
-        output_name=DEFAULT_OUTPUT_NAME, defines=None, connection=None, connection_lock=None):
+        output_name=DEFAULT_OUTPUT_NAME, defines=None, connection=None, connection_lock=None,
+        features=None):
     '''Build/run on Linux'''
     return_value = -1
     instance_text = u_utils.get_instance_text(instance)
@@ -315,7 +319,8 @@ def run(ctx, instance, platform, board_name=DEFAULT_BOARD_NAME, build_dir=DEFAUL
         if os.path.isfile(exe_path):
             os.remove(exe_path)
         nrfconnect.build(ctx, cmake_dir=DEFAULT_CMAKE_DIR, board_name=board_name,
-                         output_name=output_name, build_dir=build_dir, u_flags=defines)
+                         output_name=output_name, build_dir=build_dir,
+                         u_flags=defines, features=features)
         # Build has succeeded, we should have an executable
         if os.path.isfile(exe_path):
             # Lock the connection in order to run
@@ -379,7 +384,8 @@ def run(ctx, instance, platform, board_name=DEFAULT_BOARD_NAME, build_dir=DEFAUL
         if os.path.isfile(exe_path):
             os.remove(exe_path)
         linux.build(ctx, cmake_dir=f"{u_utils.UBXLIB_DIR}/port/platform/linux/mcu/posix/runner",
-                    output_name="runner", build_dir=build_dir, u_flags=defines)
+                    output_name="runner", build_dir=build_dir, u_flags=defines,
+                    features=features)
         # Build has succeeded, we should have an executable
         if os.path.isfile(exe_path):
             # Lock the connection in order to run
@@ -387,72 +393,78 @@ def run(ctx, instance, platform, board_name=DEFAULT_BOARD_NAME, build_dir=DEFAUL
                                    CONNECTION_LOCK_GUARD_TIME_SECONDS,
                                    logger=U_LOG) as locked_connection:
                 if locked_connection:
-                    # Create the UART loopbacks/redirections as directed by the list of defines
-                    #
-                    # For instance (noting NO quotation marks in the values of the defines):
-                    #
-                    # U_CFG_TEST_UART_PREFIX=/tmp/ttyv U_CFG_TEST_UART_A=0
-                    #
-                    # ...would cause "/tmp/ttyv0" to be looped-back on itself, or:
-                    #
-                    # U_CFG_TEST_UART_PREFIX=/tmp/ttyv U_CFG_TEST_UART_A=0 U_CFG_TEST_UART_B=1
-                    #
-                    # ...would cause "/tmp/ttyv0" to be looped-back to "/tmp/ttyv1", or:
-                    #
-                    # U_CFG_TEST_APP_PREFIX=/dev/tty U_CFG_APP_CELL_UART=0 U_CFG_APP_CELL_UART_DEV=2
-                    #
-                    # ...would cause the cellular UART "/dev/tty0" to be redirected to "/dev/tty2"
-                    uart_to_device_list = uart_to_device_list_create(defines, logger=U_LOG)
-                    if uart_to_device_list:
-                        redirect_uart_fixed(uart_to_device_list, ctx.reporter)
-                    # Start the .exe and monitor what it spits out
-                    try:
-                        # Start the executable and monitor what it spits out
-                        call_list = [exe_path]
-                        if "U_CFG_TEST_USE_VALGRIND" in defines:
-                            call_list = ["valgrind"] + ["--leak-check=yes"] +          \
-                                        [f"--error-markers={VALGRIND_START_MARKER}"] + \
-                                        [f"--suppressions={VALGRIND_SUPPRESSION_PATH}"] + call_list
+                    # Take the wired Ethernet connection down so that it is not used
+                    # instead of our PPP connection.
+                    if u_utils.exe_run(["ip", "link", "set", "eth0", "down"], logger=U_LOG):
+                        # Get pppd running, in case we're testing PPP
+                        cmd = ["pppd", "socket", f"{PPP_LOCAL_SOCKET_NAME}", f"{UART_BAUD_RATE}",
+                               "passive", "persist", "maxfail", "0", "local", "defaultroute"]
+                        with u_utils.ExeRun(cmd, logger=U_LOG) as process:
+                            # Create the UART loopbacks/redirections as directed by the list of defines
+                            #
+                            # For instance (noting NO quotation marks in the values of the defines):
+                            #
+                            # U_CFG_TEST_UART_PREFIX=/tmp/ttyv U_CFG_TEST_UART_A=0
+                            #
+                            # ...would cause "/tmp/ttyv0" to be looped-back on itself, or:
+                            #
+                            # U_CFG_TEST_UART_PREFIX=/tmp/ttyv U_CFG_TEST_UART_A=0 U_CFG_TEST_UART_B=1
+                            #
+                            # ...would cause "/tmp/ttyv0" to be looped-back to "/tmp/ttyv1", or:
+                            #
+                            # U_CFG_TEST_APP_PREFIX=/dev/tty U_CFG_APP_CELL_UART=0 U_CFG_APP_CELL_UART_DEV=2
+                            #
+                            # ...would cause the cellular UART "/dev/tty0" to be redirected to "/dev/tty2"
+                            uart_to_device_list = uart_to_device_list_create(defines, logger=U_LOG)
+                            if uart_to_device_list:
+                                redirect_uart_fixed(uart_to_device_list, ctx.reporter)
+                            # Start the executable and monitor what it spits out
+                            call_list = [exe_path]
+                            if "U_CFG_TEST_USE_VALGRIND" in defines:
+                                call_list = ["valgrind"] + ["--leak-check=yes"] +          \
+                                            [f"--error-markers={VALGRIND_START_MARKER}"] + \
+                                            [f"--suppressions={VALGRIND_SUPPRESSION_PATH}"] + \
+                                            call_list
 
-                            # If you need Valgrind to suppress more errors, the best way
-                            # to go about that is to temporarily use the following line
-                            # to obtain the necessary suppression-file contents in the
-                            # log output.  You can then use that as a basis for adding
-                            # the correct suppressions to VALGRIND_SUPPRESSION_PATH
-                            #
-                            # call_list = ["valgrind"] + ["--leak-check=yes"] + \
-                            #             [f"--error-markers={VALGRIND_START_MARKER}"] + \
-                            #             ["--gen-suppressions=all"] +          \
-                            #             [f"--suppressions={VALGRIND_SUPPRESSION_PATH}"] + call_list
-                            #
-                            # Note: the Valgrind leak summary is emitted after the executable
-                            # has been sent SIGINT, at which point we are no longer monitoring
-                            # its output, hence no leak error will be flagged by this script
-                            # (though they will still be there in the logged output)
-                            u_monitor.callback(valgrind_callback, VALGRIND_REGEX, valgrind_error_counter)
-                        with u_utils.ExeRun(call_list, logger=U_LOG) as process:
-                            return_value = u_monitor.main(process,
-                                                          u_monitor.CONNECTION_PROCESS,
-                                                          RUN_GUARD_TIME_SECONDS,
-                                                          RUN_INACTIVITY_TIME_SECONDS,
-                                                          None, instance,
-                                                          ctx.reporter,
-                                                          ctx.test_report)
-                            return_value += valgrind_error_counter[0]
-                            if return_value == 0:
-                                ctx.reporter.event(u_report.EVENT_TYPE_TEST,
-                                                   u_report.EVENT_COMPLETE)
-                            else:
-                                ctx.reporter.event(u_report.EVENT_TYPE_TEST,
-                                                   u_report.EVENT_FAILED)
-                        # Remove the redirections
-                        for device_redirect in DEVICE_REDIRECTS:
-                            u_utils.device_redirect_stop(device_redirect)
-                    except KeyboardInterrupt as ex:
-                        # Remove the redirections in case of CTRL-C
-                        for device_redirect in DEVICE_REDIRECTS:
-                            u_utils.device_redirect_stop(device_redirect)
-                        raise KeyboardInterrupt from ex
+                                # If you need Valgrind to suppress more errors, the best way
+                                # to go about that is to temporarily use the following line
+                                # to obtain the necessary suppression-file contents in the
+                                # log output.  You can then use that as a basis for adding
+                                # the correct suppressions to VALGRIND_SUPPRESSION_PATH
+                                #
+                                # call_list = ["valgrind"] + ["--leak-check=yes"] + \
+                                #             [f"--error-markers={VALGRIND_START_MARKER}"] + \
+                                #             ["--gen-suppressions=all"] +          \
+                                #             [f"--suppressions={VALGRIND_SUPPRESSION_PATH}"] + call_list
+                                #
+                                # Note: the Valgrind leak summary is emitted after the executable
+                                # has been sent SIGINT, at which point we are no longer monitoring
+                                # its output, hence no leak error will be flagged by this script
+                                # (though they will still be there in the logged output)
+                                u_monitor.callback(valgrind_callback, VALGRIND_REGEX,
+                                                   valgrind_error_counter)
+                            with u_utils.ExeRun(call_list, logger=U_LOG) as process:
+                                return_value = u_monitor.main(process,
+                                                              u_monitor.CONNECTION_PROCESS,
+                                                              RUN_GUARD_TIME_SECONDS,
+                                                              RUN_INACTIVITY_TIME_SECONDS,
+                                                              None, instance,
+                                                              ctx.reporter,
+                                                              ctx.test_report)
+                                return_value += valgrind_error_counter[0]
+                                if return_value == 0:
+                                    ctx.reporter.event(u_report.EVENT_TYPE_TEST,
+                                                       u_report.EVENT_COMPLETE)
+                                else:
+                                    ctx.reporter.event(u_report.EVENT_TYPE_TEST,
+                                                       u_report.EVENT_FAILED)
+                            # Remove the redirections
+                            for device_redirect in DEVICE_REDIRECTS:
+                                u_utils.device_redirect_stop(device_redirect)
+                    else:
+                        ctx.reporter.event(u_report.EVENT_TYPE_INFRASTRUCTURE,
+                                           u_report.EVENT_FAILED,
+                                           "unable to stop eth0")
                 else:
                     ctx.reporter.event(u_report.EVENT_TYPE_INFRASTRUCTURE,
                                        u_report.EVENT_FAILED,

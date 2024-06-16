@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,13 @@
 #define _U_PORT_APP_PLATFORM_SPECIFIC_H_
 
 /** @file
- * @brief Most of the parameters in this header file are required only to permit
- * the ubxlib example/test code to compile, and hence are present and set to -1,.
+ * @brief Parameters which may be employed in examples and tests of
+ * the ubxlib code; NONE of the parameters here are compiled into
+ * ubxlib itself.
+ *
+ * In this particular case, most of the parameters in this header file
+ * are required only to permit the ubxlib example/test code to compile,
+ * and hence are present and set to -1.
  */
 
 /* ----------------------------------------------------------------

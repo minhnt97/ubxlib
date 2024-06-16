@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@
 
 /** @file
  * @brief This header file contains configuration information for
- * the Windows platform that is fed in at application level.  On
+ * the Windows platform that is fed in at application level; NONE of
+ * the parameters here are compiled into ubxlib itself.  On
  * Windows many of the values are irrelevant, e.g. processor pin
  * numbers are not required.
  */
@@ -101,7 +102,7 @@
 #endif
 
 #ifndef U_CFG_APP_PIN_CELL_PWR_ON
-/** The GPIO output that that is connected to the PWR_ON pin of the
+/** The GPIO output that is connected to the PWR_ON pin of the
  * cellular module; not relevant for Windows and so set to -1.
  */
 # define U_CFG_APP_PIN_CELL_PWR_ON            -1
@@ -190,7 +191,6 @@
 # define U_CFG_APP_GNSS_I2C                  -1
 #endif
 
-
 #ifndef U_CFG_APP_GNSS_SPI
 /** Not available on Windows.
  */
@@ -202,7 +202,7 @@
  * -------------------------------------------------------------- */
 
 #ifndef U_CFG_APP_PIN_GNSS_ENABLE_POWER
-/** The GPIO output that that enables power to the GNSS
+/** The GPIO output that enables power to the GNSS
  * module; not relevant for Windows and so set to -1.
  */
 # define U_CFG_APP_PIN_GNSS_ENABLE_POWER     -1

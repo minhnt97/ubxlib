@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@
  */
 
 /** @file
- * @brief This header file defines the APIs that initialse and
+ * @brief This header file defines the APIs that initialise and
  * control power to a cellular module and enable it to save power
  * through sleep.  These functions are thread-safe.
  *
@@ -393,7 +393,6 @@ int32_t uCellPwrOff(uDeviceHandle_t cellHandle,
 int32_t uCellPwrOffHard(uDeviceHandle_t cellHandle, bool trulyHard,
                         bool (*pKeepGoingCallback) (uDeviceHandle_t));
 
-
 /** If a reboot of the cellular instance is required, for example
  * due to changes that have been made to the configuration,
  * this will return true. uCellPwrReboot() should be called
@@ -526,6 +525,12 @@ int32_t uCellPwrGetDtrPowerSavingPin(uDeviceHandle_t cellHandle);
 /** Set the parameters for 3GPP power saving, only valid when in
  * Cat-M1/NB1 mode and only effective when the module is connected
  * to the cellular network.
+ *
+ * IMPORTANT: the 3GPP power saving setting is _remembered_ by
+ * the module; if you have called this function once with onNotOff
+ * set to true then power saving will be _on_ for that module forever
+ * more until you call this function again with onNotOff set
+ * to false.
  *
  * If the module is registered with the network and there is no
  * radio activity (i.e. transmission to or reception from the

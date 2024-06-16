@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,20 @@
  * @brief Implementation of the port I2C API for the Zephyr platform.
  */
 
+#include <version.h>
+
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/types.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/i2c.h>
+#else
 #include <zephyr/types.h>
 #include <kernel.h>
-#include <drivers/i2c.h>
-
 #include <device.h>
+#include <drivers/i2c.h>
+#endif
+
 #include <soc.h>
 
 #include "stddef.h"
@@ -37,7 +46,6 @@
 #include "u_port_os.h"
 #include "u_cfg_os_platform_specific.h"
 #include "u_port_i2c.h"
-#include "version.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -51,8 +59,10 @@
  * the hood, they use the NRFx TWIM functions which require EasyDMA,
  * something which I2C (in Nordic speak "TWI") 0 doesn't have.
  * So, basically, use I2C HW block 1.
+ *
+ * STM32, on the other hand, has up to 4.
  */
-# define U_PORT_I2C_MAX_NUM 2
+# define U_PORT_I2C_MAX_NUM 4
 #endif
 
 #ifndef I2C_MODE_CONTROLLER
@@ -70,6 +80,7 @@ typedef struct {
     const struct device *pDevice;
     int32_t clockHertz;
     bool adopted;
+    size_t maxSegmentSize;
 } uPortI2cData_t;
 
 /* ----------------------------------------------------------------
@@ -155,7 +166,21 @@ static int32_t openI2c(int32_t i2c, int32_t pinSda, int32_t pinSdc,
                     pDevice = U_DEVICE_DT_GET_OR_NULL(i2c1);
 # endif
                     break;
-#endif
+                case 2:
+# if KERNEL_VERSION_MAJOR < 3
+                    pDevice = device_get_binding("I2C_2");
+# else
+                    pDevice = U_DEVICE_DT_GET_OR_NULL(i2c2);
+# endif
+                    break;
+                case 3:
+# if KERNEL_VERSION_MAJOR < 3
+                    pDevice = device_get_binding("I2C_3");
+# else
+                    pDevice = U_DEVICE_DT_GET_OR_NULL(i2c3);
+# endif
+                    break;
+#endif // #ifdef CONFIG_I2C
                 default:
                     break;
             }
@@ -168,6 +193,7 @@ static int32_t openI2c(int32_t i2c, int32_t pinSda, int32_t pinSdc,
                 // to flag that it is in use
                 gI2cData[i2c].pDevice = pDevice;
                 gI2cData[i2c].adopted = adopt;
+                gI2cData[i2c].maxSegmentSize = 0;
                 U_ATOMIC_INCREMENT(&gResourceAllocCount);
                 // Return the I2C HW block number as the handle
                 handleOrErrorCode = i2c;
@@ -353,15 +379,60 @@ int32_t uPortI2cGetTimeout(int32_t handle)
     return (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;;
 }
 
+// Set the maximum I2C segment size.
+int32_t uPortI2cSetMaxSegmentSize(int32_t handle, size_t maxSegmentSize)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        if ((handle >= 0) && (handle < sizeof(gI2cData) / sizeof(gI2cData[0])) &&
+            (gI2cData[handle].pDevice != NULL)) {
+            gI2cData[handle].maxSegmentSize = maxSegmentSize;
+            errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCode;
+}
+
+// Get the maximum I2C segment size.
+int32_t uPortI2cGetMaxSegmentSize(int32_t handle)
+{
+    int32_t errorCodeOrMaxSegmentSize = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCodeOrMaxSegmentSize = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        if ((handle >= 0) && (handle < sizeof(gI2cData) / sizeof(gI2cData[0])) &&
+            (gI2cData[handle].pDevice != NULL)) {
+            errorCodeOrMaxSegmentSize = (int32_t) gI2cData[handle].maxSegmentSize;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCodeOrMaxSegmentSize;
+}
+
 // Send and/or receive over the I2C interface as a controller.
-int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
-                                      const char *pSend, size_t bytesToSend,
-                                      char *pReceive, size_t bytesToReceive)
+int32_t uPortI2cControllerExchange(int32_t handle, uint16_t address,
+                                   const char *pSend, size_t bytesToSend,
+                                   char *pReceive, size_t bytesToReceive,
+                                   bool noInterveningStop)
 {
     int32_t errorCodeOrLength = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
     const struct device *pDevice = NULL;
     struct i2c_msg message[2];
-    size_t x = 0;
+    size_t x;
+    size_t thisReceiveBytes;
 
     if (gMutex != NULL) {
 
@@ -373,38 +444,146 @@ int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
             ((pSend != NULL) || (bytesToSend == 0)) &&
             ((pReceive != NULL) || (bytesToReceive == 0))) {
             pDevice = gI2cData[handle].pDevice;
-            errorCodeOrLength = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
-            if (pSend != NULL) {
-                message[x].buf = (uint8_t *) pSend;
-                message[x].len = (uint32_t) bytesToSend;
-                message[x].flags = I2C_MSG_WRITE;
-                if (address > 127) {
-                    message[x].flags |= I2C_MSG_ADDR_10_BITS;
+            errorCodeOrLength = 0;
+            // This is constructed as a do/while loop since
+            // it is permissible to send zero length data,
+            // e.g. when polling the bus for a device address
+            do {
+                memset(message, 0, sizeof(message));
+                x = 0;
+                if (bytesToSend > 0) {
+                    message[x].buf = (uint8_t *) pSend;
+                    message[x].len = (uint32_t) bytesToSend;
+                    if ((gI2cData[handle].maxSegmentSize > 0) &&
+                        (message[x].len > gI2cData[handle].maxSegmentSize)) {
+                        message[x].len = gI2cData[handle].maxSegmentSize;
+                    }
+                    bytesToSend -= message[x].len;
+                    pSend += message[x].len;
+                    message[x].flags = I2C_MSG_WRITE;
+                    if (address > 127) {
+                        message[x].flags |= I2C_MSG_ADDR_10_BITS;
+                    }
+                    if ((pReceive == NULL) && !noInterveningStop) {
+                        // If there's nothing to receive and we are not-not
+                        // going to insert a stop bit then do that
+                        message[x].flags |= I2C_MSG_STOP;
+                    }
+                    x++;
                 }
-                if (pReceive == NULL) {
-                    // If there's nothing to receive then add a stop marker
-                    // at the end of the message
-                    message[x].flags |= I2C_MSG_STOP;
+                thisReceiveBytes = 0;
+                if (bytesToReceive > 0) {
+                    message[x].buf = (uint8_t *) pReceive;
+                    message[x].len = (uint32_t) bytesToReceive;
+                    if ((gI2cData[handle].maxSegmentSize > 0) &&
+                        (message[x].len > gI2cData[handle].maxSegmentSize)) {
+                        message[x].len = gI2cData[handle].maxSegmentSize;
+                    }
+                    bytesToReceive -= message[x].len;
+                    pReceive += message[x].len;
+                    thisReceiveBytes = message[x].len;
+                    // We're definitely stopping after this message
+                    message[x].flags = I2C_MSG_READ | I2C_MSG_STOP;
+                    if (address > 127) {
+                        message[x].flags |= I2C_MSG_ADDR_10_BITS;
+                    }
+                    // If something was sent, make sure that there is
+                    // a start marker at the front of the message
+                    if (pSend != NULL) {
+                        message[x].flags |= I2C_MSG_RESTART;
+                    }
+                    x++;
                 }
-                x++;
-            }
-            if (pReceive != NULL) {
-                message[x].buf = (uint8_t *) pReceive;
-                message[x].len = (uint32_t) bytesToReceive;
-                // We're definitely stopping after this message
-                message[x].flags = I2C_MSG_READ | I2C_MSG_STOP;
-                if (address > 127) {
-                    message[x].flags |= I2C_MSG_ADDR_10_BITS;
+                if (i2c_transfer(pDevice, message, (uint8_t) x, address) == 0) {
+                    errorCodeOrLength += (int32_t) thisReceiveBytes;
+                } else {
+                    errorCodeOrLength = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
                 }
-                // If something was sent, make sure that there is
-                // a start marker at the front of the message
-                if (pSend != NULL) {
-                    message[x].flags |= I2C_MSG_RESTART;
+            } while ((errorCodeOrLength >= 0) &&
+                     ((bytesToSend > 0) || (bytesToReceive > 0)));
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCodeOrLength;
+}
+
+/** \deprecated please use uPortI2cControllerExchange() instead. */
+// Send and/or receive over the I2C interface as a controller.
+int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
+                                      const char *pSend, size_t bytesToSend,
+                                      char *pReceive, size_t bytesToReceive)
+{
+    int32_t errorCodeOrLength = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    const struct device *pDevice = NULL;
+    struct i2c_msg message[2];
+    size_t x;
+    size_t thisReceiveBytes;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCodeOrLength = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        if ((handle >= 0) && (handle < sizeof(gI2cData) / sizeof(gI2cData[0])) &&
+            (gI2cData[handle].pDevice != NULL) &&
+            ((pSend != NULL) || (bytesToSend == 0)) &&
+            ((pReceive != NULL) || (bytesToReceive == 0))) {
+            pDevice = gI2cData[handle].pDevice;
+            errorCodeOrLength = 0;
+            while ((errorCodeOrLength >= 0) &&
+                   ((bytesToSend > 0) || (bytesToReceive > 0))) {
+                memset(message, 0, sizeof(message));
+                x = 0;
+                if (bytesToSend > 0) {
+                    message[x].buf = (uint8_t *) pSend;
+                    message[x].len = (uint32_t) bytesToSend;
+                    if ((gI2cData[handle].maxSegmentSize > 0) &&
+                        (message[x].len > gI2cData[handle].maxSegmentSize)) {
+                        message[x].len = gI2cData[handle].maxSegmentSize;
+                    }
+                    bytesToSend -= message[x].len;
+                    pSend += message[x].len;
+                    message[x].flags = I2C_MSG_WRITE;
+                    if (address > 127) {
+                        message[x].flags |= I2C_MSG_ADDR_10_BITS;
+                    }
+                    if (pReceive == NULL) {
+                        // If there's nothing to receive then add a stop marker
+                        // at the end of the message
+                        message[x].flags |= I2C_MSG_STOP;
+                    }
+                    x++;
                 }
-                x++;
-            }
-            if (i2c_transfer(pDevice, message, x, address) == 0) {
-                errorCodeOrLength = (int32_t) bytesToReceive;
+                thisReceiveBytes = 0;
+                if (bytesToReceive > 0) {
+                    message[x].buf = (uint8_t *) pReceive;
+                    message[x].len = (uint32_t) bytesToReceive;
+                    if ((gI2cData[handle].maxSegmentSize > 0) &&
+                        (message[x].len > gI2cData[handle].maxSegmentSize)) {
+                        message[x].len = gI2cData[handle].maxSegmentSize;
+                    }
+                    bytesToReceive -= message[x].len;
+                    pReceive += message[x].len;
+                    thisReceiveBytes = message[x].len;
+                    // We're definitely stopping after this message
+                    message[x].flags = I2C_MSG_READ | I2C_MSG_STOP;
+                    if (address > 127) {
+                        message[x].flags |= I2C_MSG_ADDR_10_BITS;
+                    }
+                    // If something was sent, make sure that there is
+                    // a start marker at the front of the message
+                    if (pSend != NULL) {
+                        message[x].flags |= I2C_MSG_RESTART;
+                    }
+                    x++;
+                }
+                if (i2c_transfer(pDevice, message, (uint8_t) x, address) == 0) {
+                    errorCodeOrLength += (int32_t) thisReceiveBytes;
+                } else {
+                    errorCodeOrLength = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
+                }
             }
         }
 
@@ -414,7 +593,15 @@ int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
     return errorCodeOrLength;
 }
 
+/** \deprecated please use uPortI2cControllerExchange() instead. */
 // Perform a send over the I2C interface as a controller.
+//
+// IMPORTANT: if this function is called with noStop set to true, that
+// will work for nRF52/nRF53 but it will NOT work for STM32 and may
+// not work on other chipsets underneath Zephyr.  This is because
+// leaving off I2C_MSG_STOP is not guaranteed to work in all cases:
+// zome Zephry drivers insist that an I2C transaction ends with a
+// stop bit.  uPortI2cControllerExchange() should be used instead
 int32_t uPortI2cControllerSend(int32_t handle, uint16_t address,
                                const char *pSend, size_t bytesToSend,
                                bool noStop)
@@ -432,19 +619,30 @@ int32_t uPortI2cControllerSend(int32_t handle, uint16_t address,
             (gI2cData[handle].pDevice != NULL) &&
             ((pSend != NULL) || (bytesToSend == 0))) {
             pDevice = gI2cData[handle].pDevice;
-            errorCode = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
-            message.buf = (uint8_t *) pSend;
-            message.len = (uint32_t) bytesToSend;
-            message.flags = I2C_MSG_WRITE;
-            if (address > 127) {
-                message.flags |= I2C_MSG_ADDR_10_BITS;
-            }
-            if (!noStop) {
-                message.flags |= I2C_MSG_STOP;
-            }
-            if (i2c_transfer(pDevice, &message, 1, address) == 0) {
-                errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-            }
+            // This is constructed as a do/while loop since
+            // it is permissible to send zero length data,
+            // e.g. when polling the bus for a device address
+            do {
+                errorCode = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
+                message.buf = (uint8_t *) pSend;
+                message.len = (uint32_t) bytesToSend;
+                if ((gI2cData[handle].maxSegmentSize > 0) &&
+                    (message.len > gI2cData[handle].maxSegmentSize)) {
+                    message.len = gI2cData[handle].maxSegmentSize;
+                }
+                bytesToSend -= message.len;
+                pSend += message.len;
+                message.flags = I2C_MSG_WRITE;
+                if (address > 127) {
+                    message.flags |= I2C_MSG_ADDR_10_BITS;
+                }
+                if (!noStop) {
+                    message.flags |= I2C_MSG_STOP;
+                }
+                if (i2c_transfer(pDevice, &message, 1, address) == 0) {
+                    errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
+                }
+            } while ((errorCode == (int32_t) U_ERROR_COMMON_SUCCESS) && (bytesToSend > 0));
         }
 
         U_PORT_MUTEX_UNLOCK(gMutex);

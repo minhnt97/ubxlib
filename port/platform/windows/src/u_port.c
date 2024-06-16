@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -153,7 +153,7 @@ void uPortDeinit()
 // Get the current tick in milliseconds.
 int32_t uPortGetTickTimeMs()
 {
-    return GetTickCount() % INT_MAX;
+    return GetTickCount();
 }
 
 // Get the minimum amount of heap free, ever, in bytes.

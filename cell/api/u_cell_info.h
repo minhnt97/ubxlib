@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,11 +52,21 @@ extern "C" {
  */
 #define U_CELL_INFO_IMEI_SIZE 15
 
-/** The number of digits required to store an ICCID.  Note
- * that 19 digit ICCIDs also exist.  This size includes room
- * for a null terminator.
+/** The number of digits required to store an ICCID.  Note that
+ * 19 digit ICCIDs also exist.  This size includes room for a null
+ * terminator.
  */
 #define U_CELL_INFO_ICCID_BUFFER_SIZE 21
+
+#ifndef U_CELL_INFO_RADIO_REFRESH_DELAY_MS
+/** Some modules may not like the AT commands for a radio refresh
+ * being called repeatedly, hence by default we add a delay, however
+ * if your application is sensitive to power consumption/time you
+ * may wish to override this to zero and manage any delay from
+ * your application instead.
+ */
+# define U_CELL_INFO_RADIO_REFRESH_DELAY_MS 500
+#endif
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -66,11 +76,17 @@ extern "C" {
  * FUNCTIONS
  * -------------------------------------------------------------- */
 
-/** Refresh the RF status values.  Call this to refresh
- * RSSI, RSRP, RSRQ, Cell ID, EARFCN, etc.  This way all of the
- * values read are synchronised to a given point in time.  The
- * radio parameters stored by this function are cleared on
- * disconnect and reboot.
+/** Refresh the RF status values.  Call this to refresh RSSI, RSRP,
+ * RSRQ, Cell ID, EARFCN, etc.  This way all of the values read are
+ * synchronised to a given point in time.  The radio parameters
+ * stored by this function are cleared on disconnect and reboot.
+ *
+ * Note: some modules do not like the AT commands for a radio refresh
+ * being called repeatedly, hence this function includes a delay of
+ * #U_CELL_INFO_RADIO_REFRESH_DELAY_MS.  If your application is
+ * sensitive to power consumption/time you may wish to override the
+ * value of that delay to zero at compile time and manage timing
+ * from your application instead.
  *
  * @param cellHandle  the handle of the cellular instance.
  * @return            zero on success, negative error code on
@@ -315,7 +331,17 @@ int32_t uCellInfoGetFirmwareVersionStr(uDeviceHandle_t cellHandle,
  * of UTC time, use uCellInfoGetTime().
  *
  * Should the cellular network not provide time, you may set it
- * yourself with uCellCfgSetTime();
+ * yourself with uCellCfgSetTime().
+ *
+ * Note: the date emitted by the cellular module has a two-digit year
+ * and, if the network does not provide the time, a service sometimes
+ * called NITZ, Network Information and TimeZone (e.g. Telefonica in
+ * the UK does not), the year may appear as, for instance, "80" (meaning
+ * 1980) or maybe "15" (meaning 2015).  This code can only assume that
+ * "80" means 2080, hence a large number will be returned, and of course
+ * 2015 is in the past; you may wish to range-check the value returned by
+ * this function to guard against assuming the wrong time when operating
+ * on such networks.
  *
  * @param cellHandle  the handle of the cellular instance.
  * @return            on success the Unix UTC time, else negative
@@ -349,7 +375,17 @@ int32_t uCellInfoGetTimeUtcStr(uDeviceHandle_t cellHandle,
  * in the cellular network.
  *
  * Should the cellular network not provide time, you may set it
- * yourself with uCellCfgSetTime();
+ * yourself with uCellCfgSetTime().
+ *
+ * Note: the date emitted by the cellular module has a two-digit year
+ * and, if the network does not provide the time, a service sometimes
+ * called NITZ, Network Information and TimeZone (e.g. Telefonica in
+ * the UK does not), the year may appear as, for instance, "80" (meaning
+ * 1980) or maybe "15" (meaning 2015).  This code can only assume that
+ * "80" means 2080, hence a large number will be returned, and of course
+ * 2015 is in the past; you may wish to range-check the value returned by
+ * this function to guard against assuming the wrong time when operating
+ * on such networks.
  *
  * @param cellHandle             the handle of the cellular
  *                               instance.

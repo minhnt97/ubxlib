@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,6 @@ typedef struct {
     uint32_t sp;
     void *pContext;
 } uStackFrame_t;
-
 
 /* ----------------------------------------------------------------
  * FUNCTIONS
@@ -88,8 +87,6 @@ bool uDebugUtilsGetNextStackFrame(uint32_t stackTop, uStackFrame_t *pFrame);
 int32_t uDebugUtilsPrintCallStack(uint32_t sp,
                                   uint32_t stackTop,
                                   size_t maxDepth);
-
-
 
 #ifdef __cplusplus
 }

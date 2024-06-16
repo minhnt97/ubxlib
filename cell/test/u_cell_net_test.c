@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,6 +58,8 @@
 
 #include "u_test_util_resource_check.h"
 
+#include "u_timeout.h"
+
 #include "u_at_client.h"
 
 #include "u_cell_module_type.h"
@@ -91,7 +93,7 @@
 
 /** Used for keepGoingCallback() timeout.
  */
-static int64_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Handles.
  */
@@ -127,7 +129,8 @@ static bool keepGoingCallback(uDeviceHandle_t cellHandle)
         gCallbackErrorCode = 1;
     }
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -206,6 +209,7 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
     char parameter1[5]; // enough room for "Boo!"
     char parameter2[5]; // enough room for "Bah!"
     int32_t resourceCount;
+    int32_t networkCause;
 
     strncpy(parameter1, "Boo!", sizeof(parameter1));
     strncpy(parameter2, "Bah!", sizeof(parameter2));
@@ -227,7 +231,7 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
     //lint -esym(613, pModule) Suppress possible use of NULL pointer
     // for pModule from now on
 
-    // Set a registration status calback
+    // Set a registration status callback
     U_PORT_TEST_ASSERT(uCellNetSetRegistrationStatusCallback(cellHandle,
                                                              registerCallback,
                                                              (void *) parameter1) == 0);
@@ -272,9 +276,16 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
         U_PORT_TEST_ASSERT(x < 0);
     }
 
+    // Get the network cause
+    networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+    U_TEST_PRINT_LINE("network cause is %d.", networkCause);
+    U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                       (networkCause == 0));
+
     // Connect with a very short time-out to show that aborts work
     U_TEST_PRINT_LINE("testing abort of connection attempt due to timeout.");
-    gStopTimeMs = uPortGetTickTimeMs() + 1000;
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = 1000;
     x = uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
                         U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -295,8 +306,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
     U_PORT_TEST_ASSERT(x < 0);
 
     // Now connect with a sensible timeout
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     x = uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
                         U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -344,6 +355,12 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
         U_PORT_TEST_ASSERT(!gConnectCallbackCalled);
         U_PORT_TEST_ASSERT(!gHasBeenConnected);
     }
+
+    // Get the network cause
+    networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+    U_TEST_PRINT_LINE("network cause is now %d.", networkCause);
+    U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                       (networkCause == 0));
 
     // Check that we have an active RAT
     // Note: can't check that it's the right one for this module
@@ -411,7 +428,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
     // LENA-R8 which does not support reading the current APN
     // and hence can't tell if we're on the right one or not,
     // hence the timeout is larger than the 5 seconds it used to be
-    gStopTimeMs = uPortGetTickTimeMs() + 60000;
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = 60000;
     U_TEST_PRINT_LINE("connecting again with same APN...");
     x = uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
@@ -446,7 +464,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
         // Don't try using an invalid APN with SARA-U201 as it
         // upsets it too much
         U_TEST_PRINT_LINE("connecting with different (invalid) APN...");
-        gStopTimeMs = uPortGetTickTimeMs() + 10000;
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = 10000;
         x = uCellNetConnect(cellHandle, NULL, "flibble",
 # ifdef U_CELL_TEST_CFG_USERNAME
                             U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_USERNAME),
@@ -464,6 +483,12 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
         // will have deactivated what we had and been unable to
         // activate the new one
         U_PORT_TEST_ASSERT(uCellNetGetIpAddressStr(cellHandle, buffer) < 0);
+
+        // Get the network cause
+        networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+        U_TEST_PRINT_LINE("network cause with incorrect APN is %d.", networkCause);
+        U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                           (networkCause > 0));
     }
 #endif
 
@@ -483,6 +508,93 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetConnectDisconnectPlus")
     // connection may not yet be closed.
     U_TEST_PRINT_LINE("gCallbackErrorCode is %d.", gCallbackErrorCode);
     U_PORT_TEST_ASSERT(gCallbackErrorCode == 0);
+
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = 300000;
+    U_TEST_PRINT_LINE("connecting again async ...");
+    x = uCellNetConnectStart(cellHandle,
+#ifdef U_CELL_TEST_CFG_APN
+                             U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
+#else
+                             NULL,
+#endif
+#ifdef U_CELL_TEST_CFG_USERNAME
+                             U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_USERNAME),
+#else
+                             NULL,
+#endif
+#ifdef U_CELL_TEST_CFG_PASSWORD
+                             U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_PASSWORD)
+#else
+                             NULL
+#endif
+                            );
+    if (x == U_ERROR_COMMON_NOT_SUPPORTED) {
+        U_TEST_PRINT_LINE("uCellNetConnectStart() is not supported for this module.");
+
+    } else {
+        U_PORT_TEST_ASSERT(x == 0);
+
+        // Explicit wait, since in async mode we don't use keepGoingCallback
+        while (!uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                                  gTimeoutStop.durationMs)) {
+            if (uCellNetIsRegistered(cellHandle)) {
+                break;
+            }
+            uPortTaskBlock(1000);
+        }
+
+        // Check that we're registered
+        U_PORT_TEST_ASSERT(uCellNetIsRegistered(cellHandle));
+
+        // This delay is added to give it enough time to get the callbacks propagate
+        uPortTaskBlock(1000);
+
+        // Check that the status is registered
+        status = uCellNetGetNetworkStatus(cellHandle, U_CELL_NET_REG_DOMAIN_PS);
+        U_TEST_PRINT_LINE("uCellNetGetNetworkStatus() returned %d.", status);
+        U_PORT_TEST_ASSERT((status == U_CELL_NET_STATUS_REGISTERED_HOME) ||
+                           (status == U_CELL_NET_STATUS_REGISTERED_ROAMING) ||
+                           (status == U_CELL_NET_STATUS_REGISTERED_NO_CSFB_HOME) ||
+                           (status == U_CELL_NET_STATUS_REGISTERED_NO_CSFB_ROAMING));
+
+        // This delay is added to give it enough time to get the callbacks propagate
+        uTimeoutStop_t contextActivationTimeout;
+        contextActivationTimeout.timeoutStart = uTimeoutStart();
+        contextActivationTimeout.durationMs = 10000;
+        while (!uTimeoutExpiredMs(contextActivationTimeout.timeoutStart,
+                                  contextActivationTimeout.durationMs)) {
+            if (status == gLastNetStatus) {
+                break;
+            }
+            uPortTaskBlock(500);
+        }
+        U_TEST_PRINT_LINE("gLastNetStatus is %d.", gLastNetStatus);
+        U_PORT_TEST_ASSERT(gLastNetStatus == status);
+
+        // Get the IP address to check that we're still there
+        memset(buffer, '|', sizeof(buffer));
+        x = uCellNetGetIpAddressStr(cellHandle, buffer);
+        U_PORT_TEST_ASSERT(x > 0);
+        U_PORT_TEST_ASSERT(strlen(buffer) == x);
+
+        // Disconnect
+        U_PORT_TEST_ASSERT(uCellNetConnectStop(cellHandle) == 0);
+
+        // Make sure the registration status callback doesn't say we are
+        // registered
+        U_PORT_TEST_ASSERT((gLastNetStatus != U_CELL_NET_STATUS_REGISTERED_HOME) &&
+                           (gLastNetStatus != U_CELL_NET_STATUS_REGISTERED_ROAMING) &&
+                           (gLastNetStatus != U_CELL_NET_STATUS_REGISTERED_SMS_ONLY_HOME) &&
+                           (gLastNetStatus != U_CELL_NET_STATUS_REGISTERED_SMS_ONLY_ROAMING) &&
+                           (gLastNetStatus != U_CELL_NET_STATUS_REGISTERED_NO_CSFB_HOME) &&
+                           (gLastNetStatus != U_CELL_NET_STATUS_REGISTERED_NO_CSFB_ROAMING));
+
+        // Note: can't check that gHasBeenConnected is false here as the RRC
+        // connection may not yet be closed.
+        U_TEST_PRINT_LINE("gCallbackErrorCode is %d.", gCallbackErrorCode);
+        U_PORT_TEST_ASSERT(gCallbackErrorCode == 0);
+    }
 
     // Do the standard postamble, leaving the module on for the next
     // test to speed things up
@@ -510,6 +622,7 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     int32_t y = 0;
     uCellNetRat_t rat = U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED;
     int32_t resourceCount;
+    int32_t networkCause;
 
     // In case a previous test failed
     uCellTestPrivateCleanup(&gHandles);
@@ -534,8 +647,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     // user request, so give it several goes
     for (size_t x = 5; (x > 0) && (y <= 0); x--) {
         U_TEST_PRINT_LINE("scanning for networks...");
-        gStopTimeMs = uPortGetTickTimeMs() +
-                      (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
         memset(buffer, 0, sizeof(buffer));
         memset(mccMnc, 0, sizeof(mccMnc));
         for (int32_t z = uCellNetScanGetFirst(cellHandle, buffer,
@@ -570,13 +683,14 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     // since that is where the results can be used
 
     // Register with a very short time-out to show that aborts work
-    gStopTimeMs = uPortGetTickTimeMs() + 1000;
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = 1000;
     U_PORT_TEST_ASSERT(uCellNetRegister(cellHandle, NULL, keepGoingCallback) < 0);
 
     // Now register with a sensible timeout
     U_TEST_PRINT_LINE("registering...");
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     U_PORT_TEST_ASSERT(uCellNetRegister(cellHandle, NULL, keepGoingCallback) == 0);
 
     // Check that we're registered
@@ -597,13 +711,14 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
 
     // Register again: should come back with no error pretty much straight away
     U_TEST_PRINT_LINE("registering while already registered...");
-    gStopTimeMs = uPortGetTickTimeMs() + 10000;
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = 10000;
     U_PORT_TEST_ASSERT(uCellNetRegister(cellHandle, NULL, keepGoingCallback) == 0);
 
     // Now activate a PDP context
     U_TEST_PRINT_LINE("activating context...");
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONTEXT_ACTIVATION_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONTEXT_ACTIVATION_TIMEOUT_SECONDS * 1000;
     y = uCellNetActivate(cellHandle,
 #ifdef U_CELL_TEST_CFG_APN
                          U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -629,6 +744,12 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     U_PORT_TEST_ASSERT(y > 0);
     U_PORT_TEST_ASSERT(strlen(buffer) == y);
 
+    // Get the network cause
+    networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+    U_TEST_PRINT_LINE("network cause is %d.", networkCause);
+    U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                       (networkCause == 0));
+
     // Deactivate the context
     rat = uCellNetGetActiveRat(cellHandle);
     U_TEST_PRINT_LINE("deactivating context...");
@@ -637,8 +758,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
         U_CELL_PRIVATE_MODULE_IS_SARA_R4(pModule->moduleType)) {
         // If we were originally on LTE, or if this is a SARA-R4
         // we will now be deregistered, so register again
-        gStopTimeMs = uPortGetTickTimeMs() +
-                      (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
         U_PORT_TEST_ASSERT(uCellNetRegister(cellHandle, NULL, keepGoingCallback) == 0);
     } else {
         // Get the IP address again, should be gone in the non-LTE/R4 case
@@ -647,8 +768,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
 
     // Check that we can activate the PDP context again
     U_TEST_PRINT_LINE("activating context...");
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONTEXT_ACTIVATION_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONTEXT_ACTIVATION_TIMEOUT_SECONDS * 1000;
     y = uCellNetActivate(cellHandle,
 #ifdef U_CELL_TEST_CFG_APN
                          U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -682,7 +803,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     // uCellNetActivate() performs to see if the current context
     // is fine will fail and so we will detach and reattach here,
     // which takes longer
-    gStopTimeMs = uPortGetTickTimeMs() + 60000;
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = 60000;
     y = uCellNetActivate(cellHandle,
 #ifdef U_CELL_TEST_CFG_APN
                          U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -717,8 +839,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
         // Don't do this for SARA-U201 as it upsets it rather a lot
         U_TEST_PRINT_LINE("activating context with different (invalid) APN...");
         rat = uCellNetGetActiveRat(cellHandle);
-        gStopTimeMs = uPortGetTickTimeMs() +
-                      (U_CELL_TEST_CFG_CONTEXT_ACTIVATION_TIMEOUT_SECONDS * 1000);
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONTEXT_ACTIVATION_TIMEOUT_SECONDS * 1000;
         y = uCellNetActivate(cellHandle, "flibble",
 # ifdef U_CELL_TEST_CFG_USERNAME
                              U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_USERNAME),
@@ -734,6 +856,12 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
         U_PORT_TEST_ASSERT(y < 0);
         // Get the IP address.
         U_PORT_TEST_ASSERT(uCellNetGetIpAddressStr(cellHandle, buffer) < 0);
+
+        // Get the network cause
+        networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+        U_TEST_PRINT_LINE("network cause with incorrect APN is %d.", networkCause);
+        U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                           (networkCause > 0));
     }
 #endif
 
@@ -746,8 +874,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     y = -1;
     for (size_t x = 2; (x > 0) && (y < 0); x--) {
         U_TEST_PRINT_LINE("connecting manually to network %s...", mccMnc);
-        gStopTimeMs = uPortGetTickTimeMs() +
-                      (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
         y = uCellNetConnect(cellHandle, mccMnc,
 #ifdef U_CELL_TEST_CFG_APN
                             U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -788,6 +916,12 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     U_PORT_TEST_ASSERT(y > 0);
     U_PORT_TEST_ASSERT(strlen(buffer) == y);
 
+    // Get the network cause
+    networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+    U_TEST_PRINT_LINE("network cause is now %d.", networkCause);
+    U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                       (networkCause == 0));
+
     // Disconnect
     U_PORT_TEST_ASSERT(uCellNetDisconnect(cellHandle, NULL) == 0);
 
@@ -799,8 +933,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
 
     // Now register with manual network selection
     U_TEST_PRINT_LINE("registering manually on network %s...", mccMnc);
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     U_PORT_TEST_ASSERT(uCellNetRegister(cellHandle, mccMnc,
                                         keepGoingCallback) == 0);
 
@@ -815,8 +949,8 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
                        (status == U_CELL_NET_STATUS_REGISTERED_NO_CSFB_ROAMING));
 
     // Now activate a PDP context
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     y = uCellNetActivate(cellHandle,
 #ifdef U_CELL_TEST_CFG_APN
                          U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -841,6 +975,12 @@ U_PORT_TEST_FUNCTION("[cellNet]", "cellNetScanRegActDeact")
     y = uCellNetGetIpAddressStr(cellHandle, buffer);
     U_PORT_TEST_ASSERT(y > 0);
     U_PORT_TEST_ASSERT(strlen(buffer) == y);
+
+    // Get the network cause
+    networkCause = uCellNetGetLastEmmRejectCause(cellHandle);
+    U_TEST_PRINT_LINE("network cause is finally %d.", networkCause);
+    U_PORT_TEST_ASSERT((networkCause == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) ||
+                       (networkCause == 0));
 
     // Disconnect
     U_TEST_PRINT_LINE("disconnecting...");

@@ -360,9 +360,21 @@ extern "C" {
  * work for all platforms, the governing factor being ESP32,
  * which seems to require around twice the stack of NRF52
  * or STM32F4 and more again in the version pre-built for
- * Arduino.
+ * Arduino.  We wouldn't normally entertain platform
+ * switches in here but the size increase required by Arduino
+ * is too much for poor little nRF5SDK, i.e. giving the
+ * URC callback as much stack as Arduino requires, likely
+ * because the printf() used by the pre-built ESP-IDF Arduino
+ * is quite fully featured, means we don't have at least
+ * 5 kbytes application stack left free at the end of testing
+ * on nRF52, which is our baseline.  So we do a specific
+ * increase in stack size for Arduino here.
  */
-# define U_AT_CLIENT_URC_TASK_STACK_SIZE_BYTES  2304
+# ifdef __ARDUINO__
+#  define U_AT_CLIENT_URC_TASK_STACK_SIZE_BYTES  2816
+# else
+#  define U_AT_CLIENT_URC_TASK_STACK_SIZE_BYTES  2304
+# endif
 #endif
 
 #ifndef U_AT_CLIENT_URC_TASK_PRIORITY
@@ -380,7 +392,7 @@ extern "C" {
  * or STM32F4 and more again in the version pre-built for
  * Arduino/PlatformIO.
  */
-#  define U_AT_CLIENT_CALLBACK_TASK_STACK_SIZE_BYTES 2304
+#  define U_AT_CLIENT_CALLBACK_TASK_STACK_SIZE_BYTES 2560
 # else
 /** If geodesic position, using GeographicLib, is to be used, then
  * it is usually called via a uAtClientCallback() task, so give it
@@ -669,6 +681,49 @@ int32_t uAtClientTimeoutGet(const uAtClientHandle_t atHandle);
 void uAtClientTimeoutSet(uAtClientHandle_t atHandle,
                          int32_t timeoutMs);
 
+/** Get the timeout that is applied when reading items
+ * that form part of a URC.
+ *
+ * @param atHandle  the handle of the AT client.
+ * @return          the URC timeout in milliseconds.
+ */
+int32_t uAtClientTimeoutUrcGet(const uAtClientHandle_t atHandle);
+
+/** Set the timeout that is applied when reading items
+ * that form part of a URC.  This needs to be relatively
+ * short; the default if this is not called is
+ * #U_AT_CLIENT_URC_TIMEOUT_MS.
+ *
+ * @param atHandle   the handle of the AT client.
+ * @param timeoutMs  the URC timeout in milliseconds.
+ */
+void uAtClientTimeoutUrcSet(uAtClientHandle_t atHandle,
+                            int32_t timeoutMs);
+
+/** Get the delay applied before a UART is re-read (once)
+ * on receipt of no data, increasing the chances that a
+ * complete chunk of incoming data is available to parse,
+ * avoiding "stutter".
+ *
+ * @param atHandle  the handle of the AT client.
+ * @return          the read retry delay in milliseconds.
+ */
+int32_t uAtClientReadRetryDelayGet(const uAtClientHandle_t atHandle);
+
+/** Set the delay applied before a UART is re-read (once)
+ * on receipt of no data, increasing the chances that a
+ * complete chunk of incoming data is available to parse,
+ * avoiding "stutter".  This needs to be very short;
+ * the default if this is not called is
+ * #U_AT_CLIENT_STREAM_READ_RETRY_DELAY_MS.
+ *
+ * @param atHandle         the handle of the AT client.
+ * @param readRetryDelayMs the read retry delay in
+ *                         milliseconds.
+ */
+void uAtClientReadRetryDelaySet(uAtClientHandle_t atHandle,
+                                int32_t readRetryDelayMs);
+
 /** Set a callback that will be called when there has been
  * one or more consecutive AT command timeouts.  The callback
  * is called internally by the AT client using
@@ -875,7 +930,6 @@ size_t uAtClientWriteBytes(uAtClientHandle_t atHandle,
                            const char *pData,
                            size_t lengthBytes,
                            bool standalone);
-
 
 /** Write a part of a string argument to AT command sequence.
  * Used after uAtClientCommandStart() has been called to
@@ -1770,6 +1824,25 @@ int32_t uAtClientGetActivityPin(const uAtClientHandle_t atHandle);
 int32_t uAtClientGetActivityPinSettings(const uAtClientHandle_t atHandle,
                                         int32_t *pReadyMs, int32_t *pHysteresisMs,
                                         bool *pHighIsOn);
+
+/** Reads the identification information from the device.
+ *
+ * @param atHandle      the handle of the AT client.
+ * @param[out] pBuffer  a buffer in which to place the
+ *                      bytes read.  May be set to NULL
+ *                      in which case the received bytes
+ *                      are thrown away.
+ * @param lengthBytes   the maximum number of bytes to read.
+ *                      If pBuffer is NULL this should be
+ *                      set to the number of bytes to be
+ *                      read and thrown away.
+ * @return              on success, the number of characters copied into
+ *                      buffer include the terminator; on failure negative
+ *                      error code.
+ */
+int32_t uAtClientGetAti(uAtClientHandle_t atHandle,
+                        char *pBuffer,
+                        size_t lengthBytes);
 
 #ifdef __cplusplus
 }

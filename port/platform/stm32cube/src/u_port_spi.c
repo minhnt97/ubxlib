@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -274,7 +274,11 @@ static int32_t initGpio(int32_t spi, int32_t pin, uPortSpiPinType_t pinType)
 
     gpioInitStruct.Pin = (1U << U_PORT_STM32F4_GPIO_PIN(pin));
     gpioInitStruct.Mode = LL_GPIO_MODE_ALTERNATE;
-    gpioInitStruct.Speed = LL_GPIO_SPEED_FREQ_VERY_HIGH;
+    // Note: we used to set the speed to LL_GPIO_SPEED_FREQ_VERY_HIGH
+    // but that seemed to cause significant comms failures; setting
+    // the speed to medium (up to 50 MHz) is more reliable and perfectly
+    // sufficient for what is needed here
+    gpioInitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
     gpioInitStruct.OutputType = LL_GPIO_OUTPUT_PUSHPULL;
     gpioInitStruct.Pull = LL_GPIO_PULL_UP;
     gpioInitStruct.Alternate = getAf(spi, pin, pinType);
@@ -471,7 +475,8 @@ static bool configIsDifferent(int32_t spi,
            (deviceCurrent.mode != pDevice->mode) ||
            (deviceCurrent.wordSizeBytes != pDevice->wordSizeBytes) ||
            (deviceCurrent.lsbFirst != pDevice->lsbFirst) ||
-           fillWordIsDifferent(deviceCurrent.fillWord, pDevice->fillWord,
+           fillWordIsDifferent((uint16_t) deviceCurrent.fillWord,
+                               (uint16_t) pDevice->fillWord,
                                pDevice->wordSizeBytes);
 }
 

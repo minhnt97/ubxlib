@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
  * COMPILE-TIME MACROS FOR STM32F4: HEAP
  * -------------------------------------------------------------- */
 
-/** /deprecated Not stricty speaking part of the OS but there's nowhere
+/** \deprecated Not stricty speaking part of the OS but there's nowhere
  * better to put this. Set this to 1 if the C library does not free memory
  * that it has alloced internally when a task is deleted.
  * For instance, newlib when it is compiled in a certain way
@@ -60,13 +60,13 @@
 #endif
 
 #ifndef U_CFG_OS_PRIORITY_MAX
-/** The maximum task priority, should be less than or
- * equal to configMAX_PRIORITIES defined in FreeRTOSConfig.h.
+/** The maximum task priority, should be less than configMAX_PRIORITIES
+* defined in FreeRTOSConfig.h.
  */
 # ifdef CMSIS_V2
-#  define U_CFG_OS_PRIORITY_MAX 56
+#  define U_CFG_OS_PRIORITY_MAX 55
 # else
-#  define U_CFG_OS_PRIORITY_MAX 15
+#  define U_CFG_OS_PRIORITY_MAX 14
 # endif
 #endif
 

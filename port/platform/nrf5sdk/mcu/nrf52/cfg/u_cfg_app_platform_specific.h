@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@
  * @brief This header file contains configuration information for
  * an NRF52 platform that is fed in at application level.  You should
  * override these values as necessary for your particular platform.
+ * NONE of the parameters here are* compiled into ubxlib itself.
+ *
  * Note that the pin numbers used below should be those of the MCU: if you
  * are using an MCU inside a u-blox module the IO pin numbering for
  * the module is likely different to that from the MCU: check the data
@@ -129,7 +131,7 @@
 #endif
 
 #ifndef U_CFG_APP_PIN_CELL_PWR_ON
-/** The NRF52 GPIO output that that is connected to the PWR_ON
+/** The NRF52 GPIO output that is connected to the PWR_ON
  * pin of the cellular module.
  */
 # define U_CFG_APP_PIN_CELL_PWR_ON            33 // AKA 1.01
@@ -245,7 +247,7 @@
  * -------------------------------------------------------------- */
 
 #ifndef U_CFG_APP_PIN_GNSS_ENABLE_POWER
-/** The NRF52 GPIO output that that enables power to the GNSS
+/** The NRF52 GPIO output that enables power to the GNSS
  * module, use -1 if there is no such control.
  */
 # define U_CFG_APP_PIN_GNSS_ENABLE_POWER     -1

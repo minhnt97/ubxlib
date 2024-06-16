@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ static uBleTestPrivate_t gHandles = { -1, -1, NULL, NULL };
 U_PORT_TEST_FUNCTION("[bleCfg]", "bleCfgConfigureModule")
 {
     int32_t resourceCount;
-    uBleCfg_t cfg;
+    uBleCfg_t cfg = {0};
     uShortRangeUartConfig_t uart = { .uartPort = U_CFG_APP_SHORT_RANGE_UART,
                                      .baudRate = U_SHORT_RANGE_UART_BAUD_RATE,
                                      .pinTx = U_CFG_APP_PIN_SHORT_RANGE_TXD,
@@ -120,17 +120,16 @@ U_PORT_TEST_FUNCTION("[bleCfg]", "bleCfgConfigureModule")
                                                &uart,
                                                &gHandles) == 0);
 
-
     cfg.role = U_BLE_CFG_ROLE_PERIPHERAL;
+#ifndef U_CFG_TEST_BLE_DISABLE_SPS
     cfg.spsServer = true;
+#endif
     U_PORT_TEST_ASSERT(uBleCfgConfigure(gHandles.devHandle, &cfg) == 0);
 
     cfg.role = U_BLE_CFG_ROLE_CENTRAL;
-    cfg.spsServer = true;
     U_PORT_TEST_ASSERT(uBleCfgConfigure(gHandles.devHandle, &cfg) == 0);
 
     cfg.role = U_BLE_CFG_ROLE_PERIPHERAL;
-    cfg.spsServer = true;
     U_PORT_TEST_ASSERT(uBleCfgConfigure(gHandles.devHandle, &cfg) == 0);
 
     uBleTestPrivatePostamble(&gHandles);

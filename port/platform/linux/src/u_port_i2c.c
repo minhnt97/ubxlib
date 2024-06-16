@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,9 +82,9 @@ static volatile int32_t gResourceAllocCount = 0;
 /** Find possible pending data for the specified task, handle and address.
  *  Ignore address parameter if equal 0 (invalid i2c address).
  */
-static i2cPendingDataInfo_t *findPendingData(pthread_t threadId,
-                                             int32_t handle,
-                                             uint16_t address)
+static i2cPendingDataInfo_t *pFindPendingData(pthread_t threadId,
+                                              int32_t handle,
+                                              uint16_t address)
 {
     uLinkedList_t *p = gpI2cPendingDataList;
     while (p != NULL) {
@@ -129,7 +129,7 @@ void uPortI2cDeinit()
 int32_t uPortI2cOpen(int32_t i2c, int32_t pinSda, int32_t pinSdc,
                      bool controller)
 {
-    int32_t errorCode;
+    int32_t errorCodeOrHandle;
     if ((pinSda != -1) || (pinSdc != -1) || !controller) {
         return (int32_t)U_ERROR_COMMON_INVALID_PARAMETER;
     }
@@ -139,11 +139,11 @@ int32_t uPortI2cOpen(int32_t i2c, int32_t pinSda, int32_t pinSdc,
     char devName[25];
     snprintf(devName, sizeof(devName), "/dev/i2c-%d", i2c);
     // Open the I2C bus
-    errorCode = open(devName, O_RDWR);
-    if (errorCode == 0) {
+    errorCodeOrHandle = open(devName, O_RDWR);
+    if (errorCodeOrHandle >= 0) {
         U_ATOMIC_INCREMENT(&gResourceAllocCount);
     }
-    return errorCode;
+    return errorCodeOrHandle;
 }
 
 // Adopt an I2C instance.
@@ -158,7 +158,7 @@ void uPortI2cClose(int32_t handle)
     if (gMutex != NULL) {
         // Remove possible pending data.
         i2cPendingDataInfo_t *p;
-        while ((p = findPendingData(pthread_self(), handle, 0)) != NULL) {
+        while ((p = pFindPendingData(pthread_self(), handle, 0)) != NULL) {
             uPortFree(p->pPendingWriteData);
             uPortFree(p);
             uLinkedListRemove(&gpI2cPendingDataList, p);
@@ -219,6 +219,69 @@ int32_t uPortI2cGetTimeout(int32_t handle)
 }
 
 // Send and/or receive over the I2C interface as a controller.
+int32_t uPortI2cControllerExchange(int32_t handle, uint16_t address,
+                                   const char *pSend, size_t bytesToSend,
+                                   char *pReceive, size_t bytesToReceive,
+                                   bool noInterveningStop)
+{
+    int32_t errorOrSize = (int32_t)U_ERROR_COMMON_NOT_INITIALISED;
+    if (gMutex != NULL) {
+        U_PORT_MUTEX_LOCK(gMutex);
+        errorOrSize = (int32_t)U_ERROR_COMMON_INVALID_PARAMETER;
+        if (((pSend != NULL) || (bytesToSend == 0)) &&
+            ((pReceive != NULL) || (bytesToReceive == 0))) {
+            errorOrSize = (int32_t)U_ERROR_COMMON_PLATFORM;
+            if (ioctl(handle, I2C_SLAVE, address) >= 0) {
+                if (pSend != NULL) {
+                    // Send and receive, potentially with no intervening stop
+                    if (pReceive != NULL) {
+                        // Zero these structs to keep Valgrind happy when ioctl() is called
+                        struct i2c_rdwr_ioctl_data packets = {0};
+                        struct i2c_msg messages[2] = {0};
+                        messages[0].addr = address;
+                        messages[0].flags = 0;
+                        messages[0].buf = (unsigned char *)pSend;
+                        messages[0].len = (unsigned short)bytesToSend;
+                        messages[1].addr = address;
+                        if (noInterveningStop) {
+                            messages[1].flags = I2C_M_RD; // This avoids stop bit after the write
+                        }
+                        messages[1].buf = (unsigned char *)pReceive;
+                        messages[1].len = (unsigned short)bytesToReceive;
+                        packets.nmsgs++;
+                        packets.msgs = messages;
+                        packets.nmsgs = 2;
+                        int bytesReceived = ioctl(handle, I2C_RDWR, &packets);
+                        if (bytesReceived == (int)bytesToReceive) {
+                            errorOrSize = bytesReceived;
+                        }
+                    } else {
+                        // Plain send
+                        if (write(handle, pSend, bytesToSend) == bytesToSend) {
+                            errorOrSize = (int32_t)U_ERROR_COMMON_SUCCESS;
+                        }
+                    }
+                } else {
+                    // Just receive
+                    if (pReceive != NULL) {
+                        size_t bytesReceived = read(handle, pReceive, bytesToReceive);
+                        if (bytesReceived == bytesToReceive) {
+                            errorOrSize = (int32_t)bytesReceived;
+                        }
+                    } else {
+                        // Nothing to do
+                        errorOrSize = (int32_t)U_ERROR_COMMON_SUCCESS;
+                    }
+                }
+            }
+        }
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+    return errorOrSize;
+}
+
+/** \deprecated please use uPortI2cControllerExchange() instead. */
+// Send and/or receive over the I2C interface as a controller.
 int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
                                       const char *pSend, size_t bytesToSend,
                                       char *pReceive, size_t bytesToReceive)
@@ -231,7 +294,7 @@ int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
         errorOrSize = (int32_t)U_ERROR_COMMON_PLATFORM;
         U_PORT_MUTEX_LOCK(gMutex);
         if (ioctl(handle, I2C_SLAVE, address) >= 0) {
-            i2cPendingDataInfo_t *pI2cData = findPendingData(pthread_self(), handle, address);
+            i2cPendingDataInfo_t *pI2cData = pFindPendingData(pthread_self(), handle, address);
             if (pI2cData != NULL) {
                 // Pending no-stop-bit write/read for this thread and i2c block-address.
                 // Zero these structs to keep Valgrind happy when ioctl() is called
@@ -276,6 +339,7 @@ int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
     return errorOrSize;
 }
 
+/** \deprecated please use uPortI2cControllerExchange() instead. */
 // Perform a send over the I2C interface as a controller.
 int32_t uPortI2cControllerSend(int32_t handle, uint16_t address,
                                const char *pSend, size_t bytesToSend,

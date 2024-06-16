@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -250,6 +250,11 @@ typedef struct {
  * use for something else (e.g. used by the GNSS API or by Cell Locate)
  * then it cannot also be used for CellTime and hence an error may be
  * returned if cellTimeOnly is set to false.
+ *
+ * If you have compiled with U_CFG_PPP_ENABLE then calling this function,
+ * which necessarily disconnects from the network, will disconnect PPP
+ * and it will not be re-enabled until a new network connection is made,
+ * e.g. by calling uCellNetConnect().
  *
  * @param cellHandle                 the handle of the cellular instance.
  * @param mode                       the mode that CellTime should operate in,

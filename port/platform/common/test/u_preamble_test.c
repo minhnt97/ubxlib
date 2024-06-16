@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,12 +51,12 @@
 #include "u_port.h"
 #include "u_port_debug.h"
 #include "u_port_os.h"
+#include "u_port_event_queue.h"
 #if defined(U_CFG_TEST_PIN_GNSS_RESET_N) && (U_CFG_TEST_PIN_GNSS_RESET_N >= 0)
 #include "u_port_gpio.h"
 #endif
 #include "u_port_uart.h"
 #include "u_port_i2c.h"
-#include "u_port_crypto.h"
 
 #include "u_test_util_resource_check.h"
 
@@ -76,7 +76,11 @@
 
 #if defined(__NEWLIB__) && defined(_REENT_SMALL) && \
     !defined(_REENT_GLOBAL_STDIO_STREAMS) && !defined(_UNBUF_STREAM_OPT)
-# define PRE_ALLOCATE_FILE_COUNT 16
+/** Preallocated file handles (see below for how these are used),
+ * no longer required now that the tests do not rely on information
+ * from the native heap when performing memory leak checks.
+ */
+# define PRE_ALLOCATE_FILE_COUNT 0
 #endif
 
 /** The string to put at the start of all prints from this test.
@@ -94,15 +98,6 @@
 /* ----------------------------------------------------------------
  * VARIABLES
  * -------------------------------------------------------------- */
-
-/** SHA256 test vector, input, RC4.55 from:
- * https://www.dlitz.net/crypto/shad256-test-vectors/
- */
-static char const gSha256Input[] =
-    "\xde\x18\x89\x41\xa3\x37\x5d\x3a\x8a\x06\x1e\x67\x57\x6e\x92\x6d"
-    "\xc7\x1a\x7f\xa3\xf0\xcc\xeb\x97\x45\x2b\x4d\x32\x27\x96\x5f\x9e"
-    "\xa8\xcc\x75\x07\x6d\x9f\xb9\xc5\x41\x7a\xa5\xcb\x30\xfc\x22\x19"
-    "\x8b\x34\x98\x2d\xbb\x62\x9e";
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
@@ -130,7 +125,6 @@ U_PORT_TEST_FUNCTION("[preamble]", "preambleHeapDefence")
 #if (U_CFG_TEST_UART_A >= 0) || (U_CFG_TEST_UART_B >= 0) || (U_CFG_APP_GNSS_I2C >= 0)
     int32_t handle;
 #endif
-    char buffer[64];
     struct tm tmStruct = {0,  0, 0,  1, 0,  70,  0, 0, 0};
 # if defined(U_CFG_TEST_PIN_GNSS_RESET_N) && (U_CFG_TEST_PIN_GNSS_RESET_N >= 0)
     uPortGpioConfig_t gpioConfig = U_PORT_GPIO_CONFIG_DEFAULT;
@@ -189,15 +183,11 @@ U_PORT_TEST_FUNCTION("[preamble]", "preambleHeapDefence")
     uPortI2cInit();
     handle = uPortI2cOpen(U_CFG_APP_GNSS_I2C, U_CFG_APP_PIN_GNSS_SDA,
                           U_CFG_APP_PIN_GNSS_SCL, true);
-    uPortI2cClose(handle);
+    if (handle >= 0) {
+        uPortI2cClose(handle);
+    }
     uPortI2cDeinit();
 #endif
-
-    // On some platforms (e.g. ESP-IDF) the crypto libraries
-    // allocate a semaphore when they are first called
-    // which is never deleted.
-    uPortCryptoSha256(gSha256Input, sizeof(gSha256Input) - 1,
-                      buffer);
 
 #if defined(U_CFG_TEST_PIN_GNSS_RESET_N) && (U_CFG_TEST_PIN_GNSS_RESET_N >= 0)
     // If there is a GNSS module attached that has a RESET_N line
@@ -218,9 +208,10 @@ U_PORT_TEST_FUNCTION("[preamble]", "preambleHeapDefence")
     uPortTaskBlock(2000);
 #endif
 
+    uPortEventQueueCleanUp();
     uPortDeinit();
 
-#ifdef PRE_ALLOCATE_FILE_COUNT
+#if defined(PRE_ALLOCATE_FILE_COUNT) && (PRE_ALLOCATE_FILE_COUNT > 0)
     // This is a newlib-specific workaround
     // When newlib is built with _REENT_GLOBAL_STDIO_STREAMS *disabled*
     // a global dynamic pool will be used for FILE pointers.
@@ -229,7 +220,7 @@ U_PORT_TEST_FUNCTION("[preamble]", "preambleHeapDefence")
     // heap usage directly, rather than through the resource counting mechanism,
     // and so this can result in "false" memory leak failurs.
     // To mitigate this problem we start with allocating a couple of FILE
-    // pointers so that that newlib doesn't need to allocate any new ones
+    // pointers so that newlib doesn't need to allocate any new ones
     // throughout the complete test suite.
     //
     static bool files_allocated = false;

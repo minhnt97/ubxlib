@@ -6,9 +6,7 @@ Follow the instructions to build for the ESP-IDF platform:
 
 https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html#get-started-step-by-step
 
-The builds here are tested with the v5.0.3 release of ESP-IDF from [Github](https://github.com/espressif/esp-idf/releases/tag/v5.0.3) though, since `ubxlib` uses very little of ESP-IDF, versions 4.3 and 4.4 likely continue to work.
-
-Note: we tried moving to v5.1 and v5.1.1 but unfortunately a bug has been introduced in those releases which misinterprets the size of the flash inside the NINA-W15 module as 128 kbtyes instead of 8 Mbytes; this has been raised as an issue with ESP-IDF, see [ESP-IDF issue 12222](https://github.com/espressif/esp-idf/issues/12222).
+The builds here are tested with the v5.2.2 release of ESP-IDF from [Github](https://github.com/espressif/esp-idf/releases/tag/v5.2.2) though, since `ubxlib` uses very little of ESP-IDF, versions 4.3 and 4.4 likely continue to work.
 
 # SDK Usage
 You may override or provide conditional compilation flags to ESP-IDF without modifying the build file.  Do this by setting an environment variable `U_FLAGS`, e.g.:
@@ -26,7 +24,7 @@ set U_FLAGS=-DMY_FLAG -DU_CFG_APP_PIN_CELL_ENABLE_POWER=-1
 With this done, `cd` to your chosen build directory beneath this one to build and download your code.
 
 # Integration With Your Application
-To use this port in your ESP32 application you need to include the [port/platform/esp-idf/mcu/esp32/components](components) directory in your `EXTRA_COMPONENT_DIRS` and add `ubxlib` to `COMPONENTS`. As an example you can have a look at [runner/CMakeLists.txt](runner/CMakeLists.txt).  An `sdkconfig` configuration that allows the complete `ubxlib` test suite to be run can be found in [runner/sdkconfig.defaults](runner/sdkconfig.defaults) but the `ubxlib` core code requires no particular configuration beyond the default (just UART console output defaulting to HW block 0 for debugging); stack/heap should simply be configured as you require for your application.
+To use this port in your ESP32 application you need to include the [port/platform/esp-idf/mcu/esp32/components](components) directory in your `EXTRA_COMPONENT_DIRS` and add `ubxlib` to `COMPONENTS`. As an example you can have a look at [runner/CMakeLists.txt](runner/CMakeLists.txt).  An `sdkconfig` configuration that allows the complete `ubxlib` test suite to be run can be found in [runner/sdkconfig.defaults](runner/sdkconfig.defaults) but the `ubxlib` core code requires only UART console output (defaulting to HW block 0) for debugging, and `CONFIG_LWIP_PPP_SUPPORT` plus at least `CONFIG_LWIP_PPP_PAP_SUPPORT` for PPP connectivity; stack/heap should be configured as you require for your application.
 
 If you aren't already familiar with the ESP-IDF build environment, here's a step-by-step example, based on the approach ESP-IDF suggests and assuming you want to use, for instance, a sockets connection with a u-blox cellular module:
 
@@ -36,6 +34,9 @@ If you aren't already familiar with the ESP-IDF build environment, here's a step
   - Remove `ubxlib_runner` from the `EXTRA_COMPONENT_DIRS` and `COMPONENTS` set-lines ('cos we aint building `runner` anymore).
   - Remove the `TEST_COMPONENTS` set-line ('cos we aint building tests anymore).
   - Change the `../components` path in the `EXTRA_COMPONENT_DIRS` set-line to where you have put the `ubxlib` components, i.e. `<path to the ubxlib root directory>/port/platform/esp-idf/mcu/esp32/components`.
+> [!TIP]
+> If you have spaces in path, then escape spaces with '\\' or escape complete path with \\"..\\".
+> e.g: "/some/path/with\\ space/"
   - Modify the `project()` line to have your project name in it :-).
 - At a command prompt, `CD` to the above directory and run 
   - `<path to the esp-idf installation directory>/install.bat`

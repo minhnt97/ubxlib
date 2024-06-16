@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,7 +56,6 @@ static const uNetworkCfgBle_t gNetworkCfg = {
     .role = U_BLE_CFG_ROLE_PERIPHERAL,
     .spsServer = true
 };
-
 
 static void connectionCallback(int32_t connHandle, char *address, int32_t status,
                                int32_t channel, int32_t mtu, void *pParameters)

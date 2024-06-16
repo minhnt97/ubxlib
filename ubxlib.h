@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,7 @@
 #include <u_port_uart.h>
 #include <u_port_i2c.h>
 #include <u_port_spi.h>
+#include <u_port_named_pipe.h>
 
 // Module types: used in common APIs hence must come first
 #include <u_ble_module_type.h>
@@ -71,8 +72,12 @@
 #include <u_wifi_module_type.h>
 
 // Other common APIs
+#include <u_timeout.h>
+#include <u_device_handle.h>
 #include <u_device.h>
 #include <u_device_serial.h>
+#include <u_device_serial_wrapped.h>
+#include <u_network_type.h>
 #include <u_network.h>
 #include <u_network_config_ble.h>
 #include <u_network_config_cell.h>
@@ -130,6 +135,8 @@
 #include <u_cell_sock.h>
 #include <u_cell_fota.h>
 #include <u_cell_mux.h>
+#include <u_cell_ppp.h>
+#include <u_cell_sim.h>
 #include <u_cell_geofence.h>
 #include <u_gnss_type.h>
 #include <u_gnss.h>

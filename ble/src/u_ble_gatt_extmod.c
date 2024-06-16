@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@
 #include "stdlib.h"  // strol(), atoi(), strol(), strtof()
 #include "string.h"  // memset(), strncpy(), strtok_r(), strtol()
 #include "u_error_common.h"
+#include "u_timeout.h"
 #include "u_at_client.h"
 #include "u_ble.h"
 #include "u_ble_cfg.h"
@@ -77,11 +78,17 @@ static void notifyUrc(uAtClientHandle_t atHandle,
                       void *pParameter)
 {
     uBleGattNotificationCallback_t cb = (uBleGattNotificationCallback_t)pParameter;
-    uint8_t connHandle = uAtClientReadInt(atHandle);
-    uint16_t valueHandle = uAtClientReadInt(atHandle);
+    int32_t x = uAtClientReadInt(atHandle);
+    bool ok = (x >= 0);
+    uint8_t connHandle = (uint8_t) x;
+    x = uAtClientReadInt(atHandle);
+    ok = ok && (x >= 0);
+    uint16_t valueHandle = (uint16_t) x;
     uint8_t value[25];
-    uint16_t valueSize = uAtClientReadHexData(atHandle, value, sizeof(value));
-    if (valueSize > 0) {
+    x = uAtClientReadHexData(atHandle, value, sizeof(value));
+    ok = ok && (x >= 0);
+    uint16_t valueSize = (uint16_t) x;
+    if (ok && valueSize > 0) {
         cb(connHandle, valueHandle, value, (uint8_t)valueSize);
     }
 }
@@ -90,11 +97,17 @@ static void writeUrc(uAtClientHandle_t atHandle,
                      void *pParameter)
 {
     uBleGattWriteCallback_t cb = (uBleGattWriteCallback_t)pParameter;
-    uint8_t connHandle = uAtClientReadInt(atHandle);
-    uint16_t valueHandle = uAtClientReadInt(atHandle);
+    int32_t x = uAtClientReadInt(atHandle);
+    bool ok = (x >= 0);
+    uint8_t connHandle = (uint8_t) x;
+    x = uAtClientReadInt(atHandle);
+    ok = ok && (x >= 0);
+    uint16_t valueHandle = (uint16_t) x;
     uint8_t value[25];
-    uint16_t valueSize = uAtClientReadHexData(atHandle, value, sizeof(value));
-    if (valueSize > 0) {
+    x = uAtClientReadHexData(atHandle, value, sizeof(value));
+    ok = ok && (x >= 0);
+    uint16_t valueSize = (uint16_t) x;
+    if (ok && valueSize > 0) {
         cb(connHandle, valueHandle, value, (uint8_t)valueSize);
     }
 }
@@ -143,8 +156,10 @@ int32_t uBleGattDiscoverServices(uDeviceHandle_t devHandle,
             errorCode = (int32_t)U_ERROR_COMMON_SUCCESS;
             int32_t respConnHandle = uAtClientReadInt(atHandle);
             if (respConnHandle == connHandle) {
-                uint16_t startHandle = uAtClientReadInt(atHandle);
-                uint16_t endHandle = uAtClientReadInt(atHandle);
+                // Don't care about errors in the first two reads as we
+                // test for errors afterwards
+                uint16_t startHandle = (uint16_t) uAtClientReadInt(atHandle);
+                uint16_t endHandle = (uint16_t) uAtClientReadInt(atHandle);
                 ok = uAtClientErrorGet(atHandle) == 0;
                 char uuid[33];
                 ok = ok && uAtClientReadString(atHandle,
@@ -152,7 +167,7 @@ int32_t uBleGattDiscoverServices(uDeviceHandle_t devHandle,
                                                sizeof(uuid),
                                                false) >= 0;
                 if (ok && cb) {
-                    cb(connHandle, startHandle, endHandle, uuid);
+                    cb((uint8_t) connHandle, startHandle, endHandle, uuid);
                 }
             }
             if (!ok) {
@@ -187,10 +202,12 @@ int32_t uBleGattDiscoverChar(uDeviceHandle_t devHandle,
             errorCode = (int32_t)U_ERROR_COMMON_SUCCESS;
             int32_t respConnHandle = uAtClientReadInt(atHandle);
             if (respConnHandle == connHandle) {
-                uint16_t attrHandle = uAtClientReadInt(atHandle);
+                // Don't care about errors in the first two reads as we
+                // test for errors afterwards
+                uint16_t attrHandle = (uint16_t) uAtClientReadInt(atHandle);
                 uint8_t prop;
                 ok = uAtClientReadHexData(atHandle, &prop, 1) > 0;
-                uint16_t valueHandle = uAtClientReadInt(atHandle);
+                uint16_t valueHandle = (uint16_t) uAtClientReadInt(atHandle);
                 ok = ok && uAtClientErrorGet(atHandle) == 0;
                 char uuid[33];
                 ok = ok && uAtClientReadString(atHandle,
@@ -198,7 +215,7 @@ int32_t uBleGattDiscoverChar(uDeviceHandle_t devHandle,
                                                sizeof(uuid),
                                                false) >= 0;
                 if (ok && cb) {
-                    cb(connHandle, attrHandle, prop, valueHandle, uuid);
+                    cb((uint8_t) connHandle, attrHandle, prop, valueHandle, uuid);
                 }
             }
             if (!ok) {
@@ -351,8 +368,8 @@ int32_t uBleGattWriteNotifyValue(uDeviceHandle_t devHandle,
     return errorCode;
 }
 
-int32_t uBleGattAddService(uDeviceHandle_t devHandle,
-                           const char *pUuid)
+int32_t uBleGattBeginAddService(uDeviceHandle_t devHandle,
+                                const char *pUuid)
 {
     int32_t errorCode = (int32_t)U_ERROR_COMMON_NOT_INITIALISED;
     uShortRangePrivateInstance_t *pInstance;
@@ -400,7 +417,12 @@ int32_t uBleGattAddCharacteristic(uDeviceHandle_t devHandle,
                 uAtClientCommandStop(atHandle);
                 errorCode = uAtClientResponseStart(atHandle, "+UBTGCHA:");
                 if (errorCode == (int32_t)U_ERROR_COMMON_SUCCESS) {
-                    *pValueHandle = uAtClientReadInt(atHandle);
+                    errorCode = (int32_t)U_ERROR_COMMON_DEVICE_ERROR;
+                    int32_t x = uAtClientReadInt(atHandle);
+                    if (x >= 0) {
+                        *pValueHandle = (uint16_t) x;;
+                        errorCode = (int32_t)U_ERROR_COMMON_SUCCESS;
+                    }
                     uAtClientReadInt(atHandle);
                 }
                 uAtClientResponseStop(atHandle);
@@ -410,6 +432,13 @@ int32_t uBleGattAddCharacteristic(uDeviceHandle_t devHandle,
         uShortRangeUnlock();
     }
     return errorCode;
+}
+
+int32_t uBleGattEndAddService(uDeviceHandle_t devHandle)
+{
+    // Dummy for old uConnect. Service gets activated directly in uBleGattBeginAddService
+    (void)devHandle;
+    return (int32_t)U_ERROR_COMMON_SUCCESS;
 }
 
 #endif

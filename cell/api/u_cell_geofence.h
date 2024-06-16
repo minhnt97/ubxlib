@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -160,7 +160,7 @@ int32_t uCellGeofenceRemove(uDeviceHandle_t cellHandle,
  *                                 this means that if the radius is
  *                                 such that the position might _not_
  *                                 be inside the geofence(s) then the
- *                                 result will be callback with
+ *                                 callback will be called with
  *                                 #U_GEOFENCE_POSITION_STATE_OUTSIDE;
  *                                 for #U_GEOFENCE_TEST_TYPE_OUTSIDE
  *                                 this means that if the radius is

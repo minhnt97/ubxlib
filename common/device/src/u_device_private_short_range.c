@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,10 +83,13 @@ void uDevicePrivateShortRangeLink()
 // Initialise short-range.
 int32_t uDevicePrivateShortRangeInit()
 {
-    int32_t errorCode = uShortRangeEdmStreamInit();
+    int32_t errorCode = 0;
+#ifndef U_UCONNECT_GEN2
+    errorCode = uShortRangeEdmStreamInit();
     if (errorCode == 0) {
         errorCode = uAtClientInit();
     }
+#endif
     if (errorCode == 0) {
         errorCode = uBleInit();
     }
@@ -101,8 +104,10 @@ void uDevicePrivateShortRangeDeinit()
 {
     uShortRangeDeinit();
     uBleDeinit();
+#ifndef U_UCONNECT_GEN2
     uShortRangeEdmStreamDeinit();
     uAtClientDeinit();
+#endif
 }
 
 // Power up a short-range device that is external to the MCU,
@@ -116,7 +121,8 @@ int32_t uDevicePrivateShortRangeAdd(const uDeviceCfg_t *pDevCfg,
     uShortRangeUartConfig_t uartCfg;
 
     if ((pDevCfg != NULL) &&
-        (pDevCfg->transportType == U_DEVICE_TRANSPORT_TYPE_UART) &&
+        ((pDevCfg->transportType == U_DEVICE_TRANSPORT_TYPE_UART) ||
+         (pDevCfg->transportType == U_DEVICE_TRANSPORT_TYPE_UART_USB)) &&
         (pDeviceHandle != NULL)) {
         pCfgUart = &(pDevCfg->transportCfg.cfgUart);
         pCfgSho = &(pDevCfg->deviceCfg.cfgSho);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,12 @@
  * irrespective of whether GNSS is used there.
  */
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-network-gnss.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** The network configuration for GNSS.
  */
 typedef struct {
@@ -88,9 +94,16 @@ typedef struct {
                                        module pin 24 and hence 24
                                        would be used here. If no Data Ready
                                        signalling is required then specify -1. */
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
     /* This is the end of version 0 of this
-       structure: should any fields be added to
-       this structure in future they must be
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
        added AFTER this point and instructions
        must be given against each one as to how
        to set the version field if any of the

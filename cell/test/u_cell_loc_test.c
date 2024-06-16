@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -56,6 +56,8 @@
 #endif
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -181,7 +183,6 @@ static uCellLocTestAssistNowOfflineConfig_t gCellLocAssistNowOfflineSettings[] =
     }
 };
 
-
 /** The names of the AssistNow Online data types; must have U_GNSS_MGA_DATA_TYPE_MAX_NUM
  * members, matching uGnssMgaDataType_t.
  */
@@ -197,7 +198,7 @@ static const char *gpAssistNowDataType[] = {"U_GNSS_MGA_DATA_TYPE_EPHEMERIS",
 
 /** Used for keepGoingCallback() timeout.
  */
-static int64_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Cell handle as seen by posCallback().
  */
@@ -249,7 +250,8 @@ static bool keepGoingCallback(uDeviceHandle_t param)
 
     (void) param;
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -311,7 +313,7 @@ static char latLongToBits(int32_t thingX1e7,
 
 #endif //U_CFG_APP_CELL_LOC_AUTHENTICATION_TOKEN && U_CFG_TEST_CELL_LOCATE
 
-
+#ifndef U_CFG_LOC_TEST_CHANGE_SYSTEM_TYPES_DISABLE
 // The satellite system configuration tests: pulled out separately so that
 // they can be run when GNSS is powered off and when it is powered on.
 static void cellLocSystemConfigTest(uDeviceHandle_t cellHandle)
@@ -357,6 +359,7 @@ static void cellLocSystemConfigTest(uDeviceHandle_t cellHandle)
     U_PORT_TEST_ASSERT(y == 0);
     U_TEST_PRINT_LINE("system types bit map is now back to 0x%08x.", bitmap1);
 }
+#endif
 
 #ifdef U_CFG_TEST_GNSS_MODULE_TYPE
 
@@ -555,10 +558,12 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocCfg")
                                                 &gHandles, true) == 0);
     cellHandle = gHandles.cellHandle;
 
+#ifndef U_CFG_LOC_TEST_CHANGE_SYSTEM_TYPES_DISABLE
     // Check system types: since this is done with AT+UGPS=0
     // it's not much of a test (the code just has to remember stuff):
     // for a better test see cellLocAssistNow()
     cellLocSystemConfigTest(cellHandle);
+#endif
 
     // Check desired accuracy
     y = uCellLocGetDesiredAccuracy(cellHandle);
@@ -651,7 +656,6 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocLoc")
 #if defined(U_CFG_APP_CELL_LOC_AUTHENTICATION_TOKEN) && defined(U_CFG_TEST_CELL_LOCATE)
     uDeviceHandle_t cellHandle;
     int32_t resourceCount;
-    int64_t startTime;
     int32_t latitudeX1e7 = INT_MIN;
     int32_t longitudeX1e7 = INT_MIN;
     int32_t altitudeMillimetres = INT_MIN;
@@ -707,7 +711,8 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocLoc")
     U_PORT_TEST_ASSERT(x == 0);
 
     // Make sure we are connected to a network
-    gStopTimeMs = uPortGetTickTimeMs() + (U_CELL_LOC_TEST_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_LOC_TEST_TIMEOUT_SECONDS * 1000;
     x = uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
                         U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -729,8 +734,8 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocLoc")
 
     // Get position, blocking version
     U_TEST_PRINT_LINE("location establishment, blocking version.");
-    startTime = uPortGetTickTimeMs();
-    gStopTimeMs = startTime + U_CELL_LOC_TEST_TIMEOUT_SECONDS * 1000;
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_LOC_TEST_TIMEOUT_SECONDS * 1000;
     x = uCellLocGet(cellHandle, &latitudeX1e7, &longitudeX1e7,
                     &altitudeMillimetres, &radiusMillimetres,
                     &speedMillimetresPerSecond, &svs,
@@ -739,8 +744,8 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocLoc")
     // If we are running on a cellular test network we won't get position but
     // we should always get time
     if (x == 0) {
-    U_TEST_PRINT_LINE("location establishment took %d second(s).",
-                      (int32_t) (uPortGetTickTimeMs() - startTime) / 1000);
+    U_TEST_PRINT_LINE("location establishment took %u second(s).",
+                      uTimeoutElapsedSeconds(gTimeoutStop.timeoutStart));
         if ((radiusMillimetres > 0) &&
             (radiusMillimetres <= U_CELL_LOC_TEST_MAX_RADIUS_MILLIMETRES)) {
             prefix[0] = latLongToBits(latitudeX1e7, &(whole[0]), &(fraction[0]));
@@ -772,13 +777,15 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocLoc")
     // location again quickly after returning an answer
     for (int32_t y = 3; (y > 0) && (gErrorCode != 0); y--) {
         gErrorCode = 0xFFFFFFFF;
-        gStopTimeMs = startTime + U_CELL_LOC_TEST_TIMEOUT_SECONDS * 1000;
-        startTime = uPortGetTickTimeMs();
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = U_CELL_LOC_TEST_TIMEOUT_SECONDS * 1000;
         U_PORT_TEST_ASSERT(uCellLocGetStart(cellHandle, posCallback) == 0);
-        U_TEST_PRINT_LINE("waiting up to %d second(s) for results from asynchonous API...",
-                          U_CELL_LOC_TEST_TIMEOUT_SECONDS);
+        U_TEST_PRINT_LINE("waiting up to %u second(s) for results from asynchonous API...",
+                          gTimeoutStop.durationMs / 1000);
         badStatusCount = 0;
-        while ((gErrorCode == 0xFFFFFFFF) && (uPortGetTickTimeMs() < gStopTimeMs) &&
+        while ((gErrorCode == 0xFFFFFFFF) &&
+               !uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                                  gTimeoutStop.durationMs) &&
                (badStatusCount < U_CELL_LOC_TEST_BAD_STATUS_LIMIT)) {
             x = uCellLocGetStatus(cellHandle);
             U_PORT_TEST_ASSERT((x >= U_LOCATION_STATUS_UNKNOWN) &&
@@ -797,16 +804,14 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocLoc")
         // If we are running on a cellular test network we won't get position but
         // we should always get time
         if (gErrorCode == 0) {
-            U_TEST_PRINT_LINE("location establishment took %d second(s).",
-                              (int32_t) (uPortGetTickTimeMs() - startTime) / 1000);
+            U_TEST_PRINT_LINE("location establishment took %u second(s).",
+                              uTimeoutElapsedSeconds(gTimeoutStop.timeoutStart));
             U_PORT_TEST_ASSERT(gCellHandle == cellHandle);
             if ((radiusMillimetres > 0) &&
                 (radiusMillimetres <= U_CELL_LOC_TEST_MAX_RADIUS_MILLIMETRES)) {
                 x = uCellLocGetStatus(cellHandle);
                 U_PORT_TEST_ASSERT((x >= U_LOCATION_STATUS_UNKNOWN) &&
                                    (x < U_LOCATION_STATUS_MAX_NUM));
-                U_TEST_PRINT_LINE("location establishment took %d second(s).",
-                                  (int32_t) (uPortGetTickTimeMs() - startTime) / 1000);
                 U_PORT_TEST_ASSERT(gLatitudeX1e7 > INT_MIN);
                 U_PORT_TEST_ASSERT(gLongitudeX1e7 > INT_MIN);
                 U_PORT_TEST_ASSERT(gAltitudeMillimetres > INT_MIN);
@@ -922,10 +927,12 @@ U_PORT_TEST_FUNCTION("[cellLoc]", "cellLocAssistNow")
         // So that we can see what we're doing
         uGnssSetUbxMessagePrint(gnssHandle, true);
 
+#ifndef U_CFG_LOC_TEST_CHANGE_SYSTEM_TYPES_DISABLE
         // uNetworkInterfaceUp() will have switched the GNSS chip on;
         // check system types with the GNSS device powered up
         U_TEST_PRINT_LINE("testing AssistNow configuration with GNSS device on.");
         cellLocSystemConfigTest(cellHandle);
+#endif
 
         // Test AssistNow configuration
         cellLocAssistNowConfigTest(cellHandle);

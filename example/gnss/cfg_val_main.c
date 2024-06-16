@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,6 +58,11 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
+// ZEPHYR USERS may prefer to set the device and network
+// configuration from their device tree, rather than in this C
+// code: see /port/platform/zephyr/README.md for instructions on
+// how to do that.
+
 // GNSS configuration.
 //
 // Set U_CFG_TEST_GNSS_MODULE_TYPE to your module type,
@@ -66,7 +71,7 @@
 //
 // Note that the pin numbers are those of the MCU: if you
 // are using an MCU inside a u-blox module the IO pin numbering
-// for the module is likely different that from the MCU: check
+// for the module is likely different to that of the MCU: check
 // the data sheet for the module to determine the mapping.
 
 #if ((U_CFG_APP_GNSS_UART >= 0) || (U_CFG_APP_GNSS_I2C >= 0) || (U_CFG_APP_GNSS_SPI >= 0))
@@ -96,12 +101,13 @@ static const uDeviceCfg_t gDeviceCfg = {
     .transportCfg = {
         .cfgI2c = {
             .i2c = U_CFG_APP_GNSS_I2C,
-            .pinSda = U_CFG_APP_PIN_GNSS_SDA,
-            .pinScl = U_CFG_APP_PIN_GNSS_SCL
-            // There two additional fields here
-            // "clockHertz" amd "alreadyOpen", which
-            // we do NOT set, we allow the compiler
-            // to set them to 0 and all will be fine.
+            .pinSda = U_CFG_APP_PIN_GNSS_SDA,  // Use -1 if on Zephyr or Linux
+            .pinScl = U_CFG_APP_PIN_GNSS_SCL   // Use -1 if on Zephyr or Linux
+            // There are three additional fields here,
+            // "clockHertz", "alreadyOpen" and
+            // "maxSegmentSize", which we do not set,
+            // we allow the compiler to set them to 0
+            // and all will be fine.
             // You may set clockHertz if you want the
             // I2C bus to use a different clock frequency
             // to the default of
@@ -119,6 +125,11 @@ static const uDeviceCfg_t gDeviceCfg = {
             // if alreadyOpen is set to true then
             // pinSda, pinScl and clockHertz will
             // be ignored.
+            // You may set maxSegmentSize if the I2C
+            // HW you are using has a size limitation
+            // (e.g. nRF52832 does); any I2C transfer
+            // greater than this size will be split
+            // into N transfers smaller than this size.
         },
     },
 # elif (U_CFG_APP_GNSS_SPI >= 0)
@@ -126,9 +137,9 @@ static const uDeviceCfg_t gDeviceCfg = {
     .transportCfg = {
         .cfgSpi = {
             .spi = U_CFG_APP_GNSS_SPI,
-            .pinMosi = U_CFG_APP_PIN_GNSS_SPI_MOSI,
-            .pinMiso = U_CFG_APP_PIN_GNSS_SPI_MISO,
-            .pinClk = U_CFG_APP_PIN_GNSS_SPI_CLK,
+            .pinMosi = U_CFG_APP_PIN_GNSS_SPI_MOSI,  // Use -1 if on Zephyr or Linux
+            .pinMiso = U_CFG_APP_PIN_GNSS_SPI_MISO,  // Use -1 if on Zephyr or Linux
+            .pinClk = U_CFG_APP_PIN_GNSS_SPI_CLK,    // Use -1 if on Zephyr or Linux
             // Note: Zephyr users may find it more natural to use
             // .device = U_COMMON_SPI_CONTROLLER_DEVICE_INDEX_DEFAULTS(x)
             // instead of the below, where x is the index of a `cs-gpios`
@@ -141,6 +152,15 @@ static const uDeviceCfg_t gDeviceCfg = {
             // .device = U_COMMON_SPI_CONTROLLER_DEVICE_INDEX_DEFAULTS(1)
             // would use pin 14 of port GPIO 1 as the chip select.
             .device = U_COMMON_SPI_CONTROLLER_DEVICE_DEFAULTS(U_CFG_APP_PIN_GNSS_SPI_SELECT)
+            // There is an additional field here,
+            // "maxSegmentSize", which we do not set,
+            // we allow the compiler to set it to 0
+            // and all will be fine.
+            // You may set maxSegmentSize if the SPI
+            // HW you are using has a size limitation
+            // (e.g. nRF52832 does); any SPI transfer
+            // greater than this size will be split
+            // into N transfers smaller than this size.
         },
     },
 #  else
@@ -148,11 +168,12 @@ static const uDeviceCfg_t gDeviceCfg = {
     .transportCfg = {
         .cfgUart = {
             .uart = U_CFG_APP_GNSS_UART,
-            .baudRate = U_GNSS_UART_BAUD_RATE,
-            .pinTxd = U_CFG_APP_PIN_GNSS_TXD,
-            .pinRxd = U_CFG_APP_PIN_GNSS_RXD,
-            .pinCts = U_CFG_APP_PIN_GNSS_CTS,
-            .pinRts = U_CFG_APP_PIN_GNSS_RTS,
+            .baudRate = U_GNSS_UART_BAUD_RATE, /* Use 0 to try all possible baud rates
+                                                  and find the correct one. */
+            .pinTxd = U_CFG_APP_PIN_GNSS_TXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinRxd = U_CFG_APP_PIN_GNSS_RXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinCts = U_CFG_APP_PIN_GNSS_CTS,  // Use -1 if on Zephyr
+            .pinRts = U_CFG_APP_PIN_GNSS_RTS,  // Use -1 if on Zephyr
 #ifdef U_CFG_APP_UART_PREFIX
             .pPrefix = U_PORT_STRINGIFY_QUOTED(U_CFG_APP_UART_PREFIX) // Relevant for Linux only
 #else

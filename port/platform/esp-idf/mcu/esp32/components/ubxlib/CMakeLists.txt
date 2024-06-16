@@ -49,7 +49,6 @@ list(APPEND UBXLIB_INC
     ${PLATFORM_DIR}
     ${PLATFORM_DIR}/mcu/esp32/cfg
     ${PLATFORM_DIR}/../../clib
-    ${PLATFORM_DIR}/../common/mbedtls
 )
 
 list(APPEND UBXLIB_PRIVATE_INC
@@ -68,14 +67,20 @@ set(COMPONENT_SRCS
     ${PLATFORM_DIR}/src/u_port_uart.c
     ${PLATFORM_DIR}/src/u_port_i2c.c
     ${PLATFORM_DIR}/src/u_port_spi.c
+    ${PLATFORM_DIR}/src/u_port_ppp.c
     ${PLATFORM_DIR}/src/u_port_private.c
     ${PLATFORM_DIR}/../../clib/u_port_clib_mktime64.c
     ${PLATFORM_DIR}/../../u_port_timezone.c
-    ${PLATFORM_DIR}/../common/mbedtls/u_port_crypto.c
     ${UBXLIB_SRC}
 )
 set(COMPONENT_PRIV_INCLUDEDIRS
     ${UBXLIB_PRIVATE_INC}
+)
+
+# Add the platform-specific tests and examples
+list(APPEND UBXLIB_TEST_SRC
+    ${PLATFORM_DIR}/test/u_espidf_ppp_test.c
+    ${UBXLIB_BASE}/example/sockets/main_ppp_espidf.c
 )
 
 # Export these variables to parent so they can be picked up by ubxlib_runner
@@ -87,7 +92,7 @@ set(UBXLIB_BASE ${UBXLIB_BASE} PARENT_SCOPE)
 
 # For crypto functions and, from ESP-IDF v5, for drivers, timers
 # and the debug helper in esp_system
-set(COMPONENT_REQUIRES "driver" "esp_timer" "mbedtls" "esp_system" ${UBXLIB_EXTRA_LIBS})
+set(COMPONENT_REQUIRES "driver" "esp_timer" "esp_system" "esp_netif" ${UBXLIB_EXTRA_LIBS})
 
 message("COMPONENT_REQUIRES for component UBXLIB is ${COMPONENT_REQUIRES}")
 

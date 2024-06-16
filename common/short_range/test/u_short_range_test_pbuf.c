@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@
 /** @file
  * @brief Test for the mempool API
  */
-
 
 #ifdef U_CFG_OVERRIDE
 # include "u_cfg_override.h" // For a customer's configuration override
@@ -85,7 +84,7 @@ static int32_t generatePayLoad(uShortRangePbuf_t **ppBuf)
 
     if (errorCode > 0) {
         for (int i = 0; i < errorCode; i++) {
-            (*ppBuf)->data[i] = rand() % 128;
+            (*ppBuf)->data[i] = (char) (rand() % 128);
             (*ppBuf)->length++;
         }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,8 @@
 #include "u_port_uart.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -198,7 +200,7 @@ U_PORT_TEST_FUNCTION("[cellSecTls]", "cellSecTlsSettings")
     U_PORT_TEST_ASSERT((uCellSecTlsVersionGet(pContext) == 0) ||
                        (uCellSecTlsVersionGet(pContext) == 12));
     // SARA-R5, SARA-R422 and LARA-R6 have the default of root CA checking
-    if ((pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) ||
+    if ((U_CELL_PRIVATE_MODULE_IS_SARA_R5(pModule->moduleType)) ||
         (pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R422) ||
         (pModule->moduleType == U_CELL_MODULE_TYPE_LARA_R6)) {
         U_PORT_TEST_ASSERT(uCellSecTlsCertificateCheckGet(pContext, NULL, 0) ==
@@ -300,6 +302,7 @@ U_PORT_TEST_FUNCTION("[cellSecTls]", "cellSecTlsSettings")
 
     if (U_CELL_PRIVATE_HAS(pModule,
                            U_CELL_PRIVATE_FEATURE_SECURITY_TLS_CIPHER_LIST)) {
+        U_PORT_TEST_ASSERT(uCellSecTlsCipherSuiteMoreThanOne(cellHandle));
         // For modules which support a list of ciphers, add a cipher that we
         // know all cellular modules support
         U_PORT_TEST_ASSERT(uCellSecTlsCipherSuiteAdd(pContext,
@@ -355,6 +358,7 @@ U_PORT_TEST_FUNCTION("[cellSecTls]", "cellSecTlsSettings")
         }
         U_PORT_TEST_ASSERT(z == numCiphers);
     } else {
+        U_PORT_TEST_ASSERT(!uCellSecTlsCipherSuiteMoreThanOne(cellHandle));
         // Should still be able to add and remove one cipher
         U_PORT_TEST_ASSERT(uCellSecTlsCipherSuiteAdd(pContext,
                                                      U_CELL_SEC_TLS_TEST_CIPHER_1) == 0);
@@ -450,7 +454,7 @@ U_PORT_TEST_FUNCTION("[cellSecTls]", "cellSecTlsSettings")
     U_PORT_TEST_ASSERT((uCellSecTlsVersionGet(pContext) == 0) ||
                        (uCellSecTlsVersionGet(pContext) == 12));
     // SARA-R5, SARA-R422 and LARA-R6 have the default of root CA checking
-    if ((pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) ||
+    if ((U_CELL_PRIVATE_MODULE_IS_SARA_R5(pModule->moduleType)) ||
         (pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R422) ||
         (pModule->moduleType == U_CELL_MODULE_TYPE_LARA_R6)) {
         U_PORT_TEST_ASSERT(uCellSecTlsCertificateCheckGet(pContext, NULL, 0) ==

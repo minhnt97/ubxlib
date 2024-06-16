@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -221,6 +221,9 @@ void uPortTaskBlock(int32_t delayMs)
         thisSleepMs = GetTickCount64() - startTimeMs;
         if (thisSleepMs >= 0) {
             delayMs -= (int32_t) thisSleepMs;
+            if (delayMs < 0) {
+                delayMs = 0;
+            }
         } else {
             // If the tick count happens to wrap then exit
             delayMs = 0;

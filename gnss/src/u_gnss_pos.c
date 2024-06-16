@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_debug.h"
+
+#include "u_timeout.h"
 
 #include "u_time.h"
 
@@ -298,7 +300,7 @@ static void posGetTask(void *pParameter)
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
     uGnssPosGetTaskParameters_t taskParameters;
-    int64_t startTime;
+    uTimeoutStart_t timeoutStart;
     int32_t latitudeX1e7 = INT_MIN;
     int32_t longitudeX1e7 = INT_MIN;
     int32_t altitudeMillimetres = INT_MIN;
@@ -315,12 +317,13 @@ static void posGetTask(void *pParameter)
     // Lock the mutex to indicate that we're running
     U_PORT_MUTEX_LOCK(taskParameters.pInstance->posMutex);
 
-    startTime = uPortGetTickTimeMs();
+    timeoutStart = uTimeoutStart();
     taskParameters.pInstance->posTaskFlags |= U_GNSS_POS_TASK_FLAG_HAS_RUN;
 
     while ((taskParameters.pInstance->posTaskFlags & U_GNSS_POS_TASK_FLAG_KEEP_GOING) &&
            (errorCode == (int32_t) U_ERROR_COMMON_TIMEOUT) &&
-           ((uPortGetTickTimeMs() - startTime) / 1000 < U_GNSS_POS_TIMEOUT_SECONDS)) {
+           !uTimeoutExpiredSeconds(timeoutStart,
+                                   U_GNSS_POS_TIMEOUT_SECONDS)) {
         // Call posGet() to do the work
         errorCode = posGet(taskParameters.pInstance,
                            &latitudeX1e7,
@@ -460,7 +463,7 @@ int32_t uGnssPosGet(uDeviceHandle_t gnssHandle,
 #ifdef U_CFG_SARA_R5_M8_WORKAROUND
     uint8_t message[4]; // Room for the body of a UBX-CFG-ANT message
 #endif
-    int64_t startTime;
+    uTimeoutStart_t timeoutStart;
 
     if (gUGnssPrivateMutex != NULL) {
 
@@ -486,11 +489,12 @@ int32_t uGnssPosGet(uDeviceHandle_t gnssHandle,
                                            (const char *) message, 4);
             }
 #endif
-            startTime = uPortGetTickTimeMs();
+            timeoutStart = uTimeoutStart();
             errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
             while ((errorCode == (int32_t) U_ERROR_COMMON_TIMEOUT) &&
                    (((pKeepGoingCallback == NULL) &&
-                     (uPortGetTickTimeMs() - startTime) / 1000 < U_GNSS_POS_TIMEOUT_SECONDS) ||
+                     !uTimeoutExpiredSeconds(timeoutStart,
+                                             U_GNSS_POS_TIMEOUT_SECONDS)) ||
                     ((pKeepGoingCallback != NULL) && pKeepGoingCallback(gnssHandle)))) {
                 // Call posGet() to do the work
                 errorCode = posGet(pInstance,
@@ -764,8 +768,8 @@ int32_t uGnssPosGetStreamedStart(uDeviceHandle_t gnssHandle,
                                                                &pCfgVal,
                                                                U_GNSS_CFG_VAL_LAYER_RAM) == 1) {
                                 messageRate = (int32_t) pCfgVal->value;
-                                uPortFree(pCfgVal);
                             }
+                            uPortFree(pCfgVal);
                             if (messageRate != (int32_t) cfgVal.value) {
                                 errorCode = uGnssCfgPrivateValSetList(pInstance, &cfgVal, 1,
                                                                       U_GNSS_CFG_VAL_TRANSACTION_NONE,
@@ -906,7 +910,7 @@ int32_t uGnssPosGetRrlp(uDeviceHandle_t gnssHandle, char *pBuffer,
     int32_t errorCodeOrLength = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
     uGnssPrivateInstance_t *pInstance;
     int32_t messageClass;
-    int64_t startTime;
+    uTimeoutStart_t timeoutStart;
     int32_t svs;
     int32_t numBytes;
     int32_t z;
@@ -949,11 +953,12 @@ int32_t uGnssPosGetRrlp(uDeviceHandle_t gnssHandle, char *pBuffer,
             }
 #endif
             messageClass = gRrlpModeToUbxRxmMessageClass[pInstance->rrlpMode];
-            startTime = uPortGetTickTimeMs();
+            timeoutStart = uTimeoutStart();
             errorCodeOrLength = (int32_t) U_ERROR_COMMON_TIMEOUT;
             while ((errorCodeOrLength == (int32_t) U_ERROR_COMMON_TIMEOUT) &&
                    (((pKeepGoingCallback == NULL) &&
-                     (uPortGetTickTimeMs() - startTime) / 1000 < U_GNSS_POS_TIMEOUT_SECONDS) ||
+                     !uTimeoutExpiredSeconds(timeoutStart,
+                                             U_GNSS_POS_TIMEOUT_SECONDS)) ||
                     ((pKeepGoingCallback != NULL) && pKeepGoingCallback(gnssHandle)))) {
 
                 numBytes = uGnssPrivateSendReceiveUbxMessage(pInstance,
@@ -1025,7 +1030,7 @@ int32_t uGnssPosGetRrlp(uDeviceHandle_t gnssHandle, char *pBuffer,
                     *pBufferUint8 = 0xb5;
                     *(pBufferUint8 + 1) = 0x62;
                     *(pBufferUint8 + 2) = 0x02;
-                    *(pBufferUint8 + 3) = messageClass;
+                    *(pBufferUint8 + 3) = (char) messageClass;
                     // Little-endian length of the body
                     *(pBufferUint8 + 4) = (uint8_t) numBytes;
                     *(pBufferUint8 + 5) = (uint8_t) ((uint32_t) numBytes >> 8);

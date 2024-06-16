@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,6 +68,11 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
+// ZEPHYR USERS may prefer to set the device and network
+// configuration from their device tree, rather than in this C
+// code: see /port/platform/zephyr/README.md for instructions on
+// how to do that.
+
 // Below is the module configuration
 // When U_CFG_TEST_CELL_MODULE_TYPE is set this example will setup a cellular
 // link using uNetworkConfigurationCell_t.
@@ -93,10 +98,10 @@ static const uDeviceCfg_t gDeviceCfg = {
         .cfgUart = {
             .uart = U_CFG_APP_SHORT_RANGE_UART,
             .baudRate = U_SHORT_RANGE_UART_BAUD_RATE,
-            .pinTxd = U_CFG_APP_PIN_SHORT_RANGE_TXD,
-            .pinRxd = U_CFG_APP_PIN_SHORT_RANGE_RXD,
-            .pinCts = U_CFG_APP_PIN_SHORT_RANGE_CTS,
-            .pinRts = U_CFG_APP_PIN_SHORT_RANGE_RTS,
+            .pinTxd = U_CFG_APP_PIN_SHORT_RANGE_TXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinRxd = U_CFG_APP_PIN_SHORT_RANGE_RXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinCts = U_CFG_APP_PIN_SHORT_RANGE_CTS,  // Use -1 if on Zephyr
+            .pinRts = U_CFG_APP_PIN_SHORT_RANGE_RTS,  // Use -1 if on Zephyr
 #ifdef U_CFG_APP_UART_PREFIX
             .pPrefix = U_PORT_STRINGIFY_QUOTED(U_CFG_APP_UART_PREFIX) // Relevant for Linux only
 #else
@@ -122,7 +127,7 @@ static const uNetworkType_t gNetType = U_NETWORK_TYPE_WIFI;
 //
 // Note that the pin numbers are those of the MCU: if you
 // are using an MCU inside a u-blox module the IO pin numbering
-// for the module is likely different that from the MCU: check
+// for the module is likely different to that of the MCU: check
 // the data sheet for the module to determine the mapping.
 
 // DEVICE i.e. module/chip configuration: in this case a cellular
@@ -144,10 +149,10 @@ static const uDeviceCfg_t gDeviceCfg = {
         .cfgUart = {
             .uart = U_CFG_APP_CELL_UART,
             .baudRate = U_CELL_UART_BAUD_RATE,
-            .pinTxd = U_CFG_APP_PIN_CELL_TXD,
-            .pinRxd = U_CFG_APP_PIN_CELL_RXD,
-            .pinCts = U_CFG_APP_PIN_CELL_CTS,
-            .pinRts = U_CFG_APP_PIN_CELL_RTS,
+            .pinTxd = U_CFG_APP_PIN_CELL_TXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinRxd = U_CFG_APP_PIN_CELL_RXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinCts = U_CFG_APP_PIN_CELL_CTS,  // Use -1 if on Zephyr
+            .pinRts = U_CFG_APP_PIN_CELL_RTS,  // Use -1 if on Zephyr
 #ifdef U_CFG_APP_UART_PREFIX
             .pPrefix = U_PORT_STRINGIFY_QUOTED(U_CFG_APP_UART_PREFIX) // Relevant for Linux only
 #else
@@ -161,7 +166,7 @@ static const uNetworkCfgCell_t gNetworkCfg = {
     .type = U_NETWORK_TYPE_CELL,
     .pApn = NULL, /* APN: NULL to accept default.  If using a Thingstream SIM enter "tsiot" here */
     .timeoutSeconds = 240 /* Connection timeout in seconds */
-    // There are four additional fields here which we do NOT set,
+    // There are six additional fields here which we do NOT set,
     // we allow the compiler to set them to 0 and all will be fine.
     // The fields are:
     //
@@ -191,6 +196,18 @@ static const uNetworkCfgCell_t gNetworkCfg = {
     //   figuring out the authentication mode automatically but
     //   you ONLY NEED TO WORRY ABOUT IT if you were given that user
     //   name and password with the APN (which is thankfully not usual).
+    //
+    // - "pMccMnc": ONLY required if you wish to connect to a specific
+    //   MCC/MNC rather than to the best available network; should point
+    //   to the null-terminated string giving the MCC and MNC of the PLMN
+    //   to use (for example "23410").
+    //
+    // - "pUartPpp": ONLY REQUIRED if U_CFG_PPP_ENABLE is defined AND
+    //   you wish to run a PPP interface to the cellular module over a
+    //   DIFFERENT serial port to that which was specified in the device
+    //   configuration passed to uDeviceOpen().  This is useful if you
+    //   are using the USB interface of a cellular module, which does not
+    //   support the CMUX protocol that multiplexes PPP with AT.
 };
 static const uNetworkType_t gNetType = U_NETWORK_TYPE_CELL;
 #else
@@ -236,7 +253,7 @@ U_PORT_TEST_FUNCTION("[example]", "exampleMqttClient")
     char buffer[64];
     size_t bufferSize;
     volatile bool messagesAvailable = false;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     int32_t returnCode;
 
     // Initialise the APIs we will need
@@ -313,42 +330,51 @@ U_PORT_TEST_FUNCTION("[example]", "exampleMqttClient")
                     // uMqttClientSnSubscribeNormalTopic() instead and
                     // capture the returned MQTT-SN topic name for use with
                     // uMqttClientSnPublish() a few lines below
+                    // Note: >= in this case since the function
+                    // returns the QOS of the subscription, which
+                    // can be 0, 1 or 2.
+                    // Note: we used to use U_MQTT_QOS_EXACTLY_ONCE
+                    // (2) here but AWS's MQTT broker does not support
+                    // a QoS of 2, hence we switched to
+                    // U_MQTT_QOS_AT_LEAST_ONCE (1).
                     if (uMqttClientSubscribe(pContext, topic,
-                                             U_MQTT_QOS_EXACTLY_ONCE)) {
+                                             U_MQTT_QOS_AT_LEAST_ONCE) >= 0) {
 
                         // Publish our message to our topic on the
                         // MQTT broker
                         uPortLog("Publishing \"%s\" to topic \"%s\"...\n",
                                  message, topic);
-                        startTimeMs = uPortGetTickTimeMs();
+                        timeoutStart = uTimeoutStart();
                         // If you were using MQTT-SN, you would call
                         // uMqttClientSnPublish() instead and pass it
                         // the MQTT-SN topic name returned by
                         // uMqttClientSnSubscribeNormalTopic()
                         if (uMqttClientPublish(pContext, topic, message,
                                                sizeof(message) - 1,
-                                               U_MQTT_QOS_EXACTLY_ONCE,
+                                               U_MQTT_QOS_AT_LEAST_ONCE,
                                                false) == 0) {
 
                             // Wait for us to be notified that our new
                             // message is available on the broker
                             while (!messagesAvailable &&
-                                   (uPortGetTickTimeMs() - startTimeMs < 10000)) {
+                                   !uTimeoutExpiredSeconds(timeoutStart, 10)) {
                                 uPortTaskBlock(1000);
                             }
 
                             // Read the new message from the broker
-                            while (uMqttClientGetUnread(pContext) > 0) {
+                            while ((uMqttClientGetUnread(pContext) > 0) &&
+                                   (returnCode == 0)) {
                                 bufferSize = sizeof(buffer);
                                 // If you were using MQTT-SN, you would call
                                 // uMqttClientSnMessageRead() instead and, rather
                                 // than passing it the buffer "topic", you
                                 // would pass it a pointer to a variable of
                                 // type uMqttSnTopicName_t
-                                if (uMqttClientMessageRead(pContext, topic,
-                                                           sizeof(topic),
-                                                           buffer, &bufferSize,
-                                                           NULL) == 0) {
+                                returnCode = uMqttClientMessageRead(pContext, topic,
+                                                                    sizeof(topic),
+                                                                    buffer, &bufferSize,
+                                                                    NULL);
+                                if (returnCode == 0) {
                                     uPortLog("New message in topic \"%s\" is %d"
                                              " character(s): \"%.*s\".\n", topic,
                                              bufferSize, bufferSize, buffer);

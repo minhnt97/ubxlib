@@ -9,6 +9,8 @@ if(CONFIG_UBXLIB)
 get_filename_component(UBXLIB_BASE ../../../ ABSOLUTE)
 set(ENV{UBXLIB_BASE} ${UBXLIB_BASE})
 
+list(APPEND ZEPHYR_EXTRA_MODULES ${UBXLIB_BASE}/drivers)
+
 # Add environment variables passed-in via U_FLAGS
 if (DEFINED ENV{U_FLAGS})
     separate_arguments(U_FLAGS NATIVE_COMMAND "$ENV{U_FLAGS}")
@@ -62,9 +64,10 @@ target_sources(app PRIVATE
     src/u_port_uart.c
     src/u_port_i2c.c
     src/u_port_spi.c
+    src/u_port_ppp.c
+    src/u_port_board_cfg.c
     src/u_port_private.c
     ${UBXLIB_BASE}/port/clib/u_port_clib_mktime64.c
-    ${UBXLIB_BASE}/port/platform/common/mbedtls/u_port_crypto.c
 )
 
 if (CONFIG_UBXLIB_OPEN_CPU_BLE)
@@ -78,7 +81,7 @@ zephyr_include_directories(
     cfg
     src
     ${UBXLIB_BASE}/port/clib
-    ${ZEPHYR_BASE}/include/zephyr
+    ${ZEPHYR_BASE}/include
 )
 
 # Add any compile options that came out of ubxlib.cmake
@@ -88,13 +91,17 @@ target_compile_options(app PRIVATE ${UBXLIB_COMPILE_OPTIONS})
 if (CONFIG_UBXLIB_TEST)
     target_compile_definitions(app PRIVATE UNITY_INCLUDE_CONFIG_H)
 
-    target_sources(app PRIVATE
+   target_sources(app PRIVATE
         ${UBXLIB_TEST_SRC}
+        test/u_zephyr_ppp_test.c
+        ${UBXLIB_BASE}/example/sockets/main_ppp_zephyr.c
+        test/u_zephyr_port_board_cfg_test.c
     )
 
     zephyr_include_directories(
         ${UBXLIB_PRIVATE_INC}
         ${UBXLIB_TEST_INC}
+        test
     )
 
     # we need to build https://github.com/ThrowTheSwitch/unity
@@ -105,7 +112,7 @@ if (CONFIG_UBXLIB_TEST)
     # 3. if the nRF Connect SDK is inside our workspace, it will be at
     #    ${ZEPHYR_BASE}/../test/cmock/vendor/unity
     # 4. otherwise the platform itself must build and include it
-    if (DEFINED $ENV{UNITY_PATH})
+    if (DEFINED ENV{UNITY_PATH})
         set(UNITY_PATH $ENV{UNITY_PATH})
     elseif (EXISTS "${ZEPHYR_BASE}/../modules/test/unity")
         # this is the location if west fetched unity for us

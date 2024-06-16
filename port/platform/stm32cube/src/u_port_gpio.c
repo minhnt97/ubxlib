@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ int32_t uPortGpioSet(int32_t pin, int32_t level)
     uPortPrivateGpioEnableClock(pin);
 
     HAL_GPIO_WritePin(pUPortPrivateGpioGetReg(pin),
-                      1U << U_PORT_STM32F4_GPIO_PIN(pin),
+                      (uint16_t) (1U << U_PORT_STM32F4_GPIO_PIN(pin)),
                       level);
 
     return (int32_t) U_ERROR_COMMON_SUCCESS;
@@ -150,7 +150,7 @@ int32_t uPortGpioGet(int32_t pin)
     uPortPrivateGpioEnableClock(pin);
 
     return HAL_GPIO_ReadPin(pUPortPrivateGpioGetReg(pin),
-                            1U << U_PORT_STM32F4_GPIO_PIN(pin));
+                            (uint16_t) (1U << U_PORT_STM32F4_GPIO_PIN(pin)));
 }
 
 // End of file

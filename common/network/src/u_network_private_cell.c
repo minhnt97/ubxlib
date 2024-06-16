@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,11 +40,14 @@
 #include "u_port.h"
 #include "u_port_uart.h"
 
+#include "u_timeout.h"
+
 #include "u_at_client.h"
 
 #include "u_device.h"
 #include "u_device_shared.h"
 #include "u_device_shared_cell.h"
+#include "u_device_serial_wrapped.h"
 
 #include "u_network_shared.h"
 
@@ -52,6 +55,7 @@
 #include "u_cell.h"
 #include "u_cell_net.h"
 #include "u_cell_pwr.h"
+#include "u_cell_ppp.h"
 
 #include "u_network.h"
 #include "u_network_config_cell.h"
@@ -83,7 +87,8 @@ static bool keepGoingCallback(uDeviceHandle_t devHandle)
     if (uDeviceGetInstance(devHandle, &pDevInstance) == 0) {
         pContext = (uDeviceCellContext_t *) pDevInstance->pContext;
         if ((pContext == NULL) ||
-            (uPortGetTickTimeMs() < pContext->stopTimeMs)) {
+            !uTimeoutExpiredMs(pContext->timeoutStop.timeoutStart,
+                               pContext->timeoutStop.durationMs)) {
             keepGoing = true;
         }
     }
@@ -157,6 +162,7 @@ int32_t uNetworkPrivateChangeStateCell(uDeviceHandle_t devHandle,
     uDeviceInstance_t *pDevInstance;
     int32_t errorCode = uDeviceGetInstance(devHandle, &pDevInstance);
     bool (*pKeepGoingCallback)(uDeviceHandle_t devHandle) = keepGoingCallback;
+    int32_t timeoutSeconds;
 
     if (errorCode == 0) {
         errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
@@ -167,9 +173,13 @@ int32_t uNetworkPrivateChangeStateCell(uDeviceHandle_t devHandle,
                 // The user has given us a keep-going callback, so use it
                 pKeepGoingCallback = pCfg->pKeepGoingCallback;
             } else {
+                timeoutSeconds = pCfg->timeoutSeconds;
                 // Set the stop time for the connect/disconnect calls
-                pContext->stopTimeMs = uPortGetTickTimeMs() +
-                                       (((int64_t) pCfg->timeoutSeconds) * 1000);
+                if (timeoutSeconds <= 0) {
+                    timeoutSeconds = U_CELL_NET_CONNECT_TIMEOUT_SECONDS;
+                }
+                pContext->timeoutStop.timeoutStart = uTimeoutStart();
+                pContext->timeoutStop.durationMs = timeoutSeconds * 1000;
             }
             if (upNotDown) {
                 // Set the authentication mode
@@ -181,17 +191,56 @@ int32_t uNetworkPrivateChangeStateCell(uDeviceHandle_t devHandle,
                     // for uNetworkInterfaceUp(), so change it to "invalid parameter"
                     errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
                 }
+                if ((errorCode == 0) && (pCfg->pUartPpp != NULL)) {
+                    errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
+                    // We've been given a UART configuration for PPP;
+                    // create a serial device on it and let cellular
+                    // know about it
+                    if (pContext->pPppDeviceSerial != NULL) {
+                        // If we already had one, remove it first
+                        uCellPppDevice(devHandle, NULL);
+                        uDeviceSerialDelete(pContext->pPppDeviceSerial);
+                    }
+                    pContext->pPppDeviceSerial = pDeviceSerialCreateWrappedUart(pCfg->pUartPpp);
+                    if (pContext->pPppDeviceSerial != NULL) {
+                        errorCode = uCellPppDevice(devHandle, pContext->pPppDeviceSerial);
+                        if (errorCode < 0) {
+                            // Clean up on error
+                            uDeviceSerialDelete(pContext->pPppDeviceSerial);
+                            pContext->pPppDeviceSerial = NULL;
+                        }
+                    }
+                }
                 if (errorCode == 0) {
-                    // Connect using automatic selection
-                    errorCode = uCellNetConnect(devHandle, NULL,
-                                                pCfg->pApn,
-                                                pCfg->pUsername,
-                                                pCfg->pPassword,
-                                                pKeepGoingCallback);
+                    if (pCfg->asyncConnect) {
+                        // Non-Blocking Connect
+                        // pMccMnc can't be used with asynchronous connect
+                        errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+                        if (pCfg->pMccMnc == NULL) {
+                            // Non-Blocking Connect
+                            errorCode = uCellNetConnectStart(devHandle,
+                                                             pCfg->pApn,
+                                                             pCfg->pUsername,
+                                                             pCfg->pPassword);
+                        }
+                    } else {
+                        // Connect using automatic selection
+                        errorCode = uCellNetConnect(devHandle,
+                                                    pCfg->pMccMnc,
+                                                    pCfg->pApn,
+                                                    pCfg->pUsername,
+                                                    pCfg->pPassword,
+                                                    pKeepGoingCallback);
+                    }
                 }
             } else {
                 // Disconnect
                 errorCode = uCellNetDisconnect(devHandle, pKeepGoingCallback);
+                if ((errorCode == 0) && (pContext->pPppDeviceSerial != NULL)) {
+                    errorCode = uCellPppDevice(devHandle, NULL);
+                    uDeviceSerialDelete(pContext->pPppDeviceSerial);
+                    pContext->pPppDeviceSerial = NULL;
+                }
             }
         }
     }

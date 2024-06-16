@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,8 @@
 #include "u_port_uart.h"
 #include "u_port_i2c.h"
 #include "u_port_spi.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -96,7 +98,7 @@ int32_t uGnssUtilUbxTransparentSendReceive(uDeviceHandle_t gnssHandle,
     uGnssPrivateInstance_t *pInstance;
     int32_t privateStreamTypeOrError;
     uDeviceSerial_t *pDeviceSerial = NULL;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     int32_t x = 0;
     int32_t bytesRead = 0;
     char *pBuffer;
@@ -130,11 +132,11 @@ int32_t uGnssUtilUbxTransparentSendReceive(uDeviceHandle_t gnssHandle,
                                                                    commandLengthBytes);
                         break;
                     case U_GNSS_PRIVATE_STREAM_TYPE_I2C:
-                        errorCodeOrResponseLength = uPortI2cControllerSend(pInstance->transportHandle.i2c,
-                                                                           pInstance->i2cAddress,
-                                                                           pCommand,
-                                                                           commandLengthBytes,
-                                                                           false);
+                        errorCodeOrResponseLength = uPortI2cControllerExchange(pInstance->transportHandle.i2c,
+                                                                               pInstance->i2cAddress,
+                                                                               pCommand,
+                                                                               commandLengthBytes,
+                                                                               NULL, 0, false);
                         if (errorCodeOrResponseLength == 0) {
                             errorCodeOrResponseLength = commandLengthBytes;
                         }
@@ -173,11 +175,11 @@ int32_t uGnssUtilUbxTransparentSendReceive(uDeviceHandle_t gnssHandle,
                     errorCodeOrResponseLength = (int32_t) U_ERROR_COMMON_SUCCESS;
                     if (pResponse != NULL) {
                         errorCodeOrResponseLength = (int32_t) U_GNSS_ERROR_TRANSPORT;
-                        startTimeMs = uPortGetTickTimeMs();
+                        timeoutStart = uTimeoutStart();
                         // Wait for something to start coming back
                         while ((bytesRead < (int32_t) maxResponseLengthBytes) &&
                                ((x = uGnssPrivateStreamGetReceiveSize(pInstance)) <= 0) &&
-                               (uPortGetTickTimeMs() - startTimeMs < pInstance->timeoutMs)) {
+                               !uTimeoutExpiredMs(timeoutStart, pInstance->timeoutMs)) {
                             // Relax a little
                             uPortTaskBlock(U_GNSS_UTIL_TRANSPARENT_RECEIVE_DELAY_MS);
                         }
@@ -185,7 +187,7 @@ int32_t uGnssUtilUbxTransparentSendReceive(uDeviceHandle_t gnssHandle,
                             // Got something; continue receiving until nothing arrives or we time out
                             while ((bytesRead < (int32_t) maxResponseLengthBytes) &&
                                    ((x = uGnssPrivateStreamGetReceiveSize(pInstance)) > 0) &&
-                                   (uPortGetTickTimeMs() - startTimeMs < pInstance->timeoutMs)) {
+                                   !uTimeoutExpiredMs(timeoutStart, pInstance->timeoutMs)) {
                                 if (x > 0) {
                                     if (x > ((int32_t) maxResponseLengthBytes) - bytesRead) {
                                         x = maxResponseLengthBytes - bytesRead;
@@ -197,9 +199,10 @@ int32_t uGnssUtilUbxTransparentSendReceive(uDeviceHandle_t gnssHandle,
                                                               pResponse + bytesRead, x);
                                             break;
                                         case U_GNSS_PRIVATE_STREAM_TYPE_I2C:
-                                            x = uPortI2cControllerSendReceive(pInstance->transportHandle.i2c,
-                                                                              pInstance->i2cAddress,
-                                                                              NULL, 0, pResponse + bytesRead, x);
+                                            x = uPortI2cControllerExchange(pInstance->transportHandle.i2c,
+                                                                           pInstance->i2cAddress,
+                                                                           NULL, 0, pResponse + bytesRead, x,
+                                                                           false);
                                             break;
                                         case U_GNSS_PRIVATE_STREAM_TYPE_SPI:
                                             // For the SPI case, we need to pull the data that was

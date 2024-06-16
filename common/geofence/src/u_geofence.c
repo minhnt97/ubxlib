@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,6 +145,8 @@
 #include "u_compiler.h"    // For U_WEAK, U_INLINE
 
 #include "u_error_common.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -462,11 +464,11 @@ static void reverseHaversine(double latitude, double longitude,
     }
 }
 
-// The intersection calculation here is derived from the equstion for
+// The intersection calculation here is derived from the equation for
 // the intersection of two great circles.  The original is "Intersection of
 // two paths" at https://www.movable-type.co.uk/scripts/latlong.html.
 // IMPORTANT: this function doesn't always behave (for narrow angles or
-// medirian/equatorial lines).  Should it detect that this is the case
+// meridian/equatorial lines).  Should it detect that this is the case
 // it will still give an answer but will also return false.
 // Implementation note: it would be possible, of course, to have
 // sub-functions to obtain bearing etc. but then it wouldn't be possible
@@ -818,7 +820,7 @@ static bool latitudeOfIntersection(const uGeofenceCoordinates_t *pA,
                                                       longitude,
                                                       &intersectLatitude);
         }
-        success = (intersectLatitude == intersectLatitude); // nan test
+        success = success && (intersectLatitude == intersectLatitude); // nan test
     } else {
         success = true;
         // Cut latitude (y) = start latitude (yA) + difference in longitude (xADelta) * slope (yAB/xAB)
@@ -827,6 +829,7 @@ static bool latitudeOfIntersection(const uGeofenceCoordinates_t *pA,
         // during the calculation
         double aLatitude = pA->latitude;
         double aLongitude = pA->longitude;
+        // codechecker_suppress [readability-suspicious-call-argument]
         double longitudeDelta = longitudeSubtract(longitude, aLongitude);
         double slope = (pB->latitude - aLatitude) / longitudeSubtract(pB->longitude, aLongitude);
         intersectLatitude = aLatitude + (longitudeDelta * slope);
@@ -1257,21 +1260,18 @@ static uGeofencePositionState_t testSquareExtent(const uGeofenceSquare_t *pSquar
 static uGeofencePositionState_t testSpeed(const uGeofenceDynamic_t *pPreviousDistance)
 {
     uGeofencePositionState_t positionState = U_GEOFENCE_POSITION_STATE_NONE;
-    int32_t timeNowMs;
+    uint32_t timeDifferenceMs;
     int64_t distanceTravelledMillimetres;
 
     if ((pPreviousDistance->lastStatus.distanceMillimetres != LLONG_MIN) &&
         (pPreviousDistance->maxHorizontalSpeedMillimetresPerSecond >= 0)) {
         // Work out how far we can have travelled in the time
-        timeNowMs = uPortGetTickTimeMs();
-        // Guard against wrap
-        if (timeNowMs > pPreviousDistance->lastStatus.timeMs) {
-            // Divide by 1000 below to get per second
-            distanceTravelledMillimetres = ((int64_t) (timeNowMs - pPreviousDistance->lastStatus.timeMs)) *
-                                           pPreviousDistance->maxHorizontalSpeedMillimetresPerSecond / 1000;
-            if (distanceTravelledMillimetres < pPreviousDistance->lastStatus.distanceMillimetres) {
-                positionState = U_GEOFENCE_POSITION_STATE_OUTSIDE;
-            }
+        timeDifferenceMs = uTimeoutElapsedMs(pPreviousDistance->lastStatus.timeoutStart);
+        // Divide by 1000 below to get per second
+        distanceTravelledMillimetres = ((int64_t) timeDifferenceMs) *
+                                       pPreviousDistance->maxHorizontalSpeedMillimetresPerSecond / 1000;
+        if (distanceTravelledMillimetres < pPreviousDistance->lastStatus.distanceMillimetres) {
+            positionState = U_GEOFENCE_POSITION_STATE_OUTSIDE;
         }
     }
 
@@ -1585,6 +1585,7 @@ bool testPosition(const uGeofence_t *pFence,
             // in which case we need WGS84 calculations all-round
             wgs84Required = (radiusMillimetres > U_GEOFENCE_WGS84_THRESHOLD_METRES * 1000) ||
                             atAPole(coordinates.latitude,
+                                    // codechecker_suppress [bugprone-integer-division]
                                     (double) (radiusMillimetres / 1000) + 1); // +1 to round up;
             // Need this for the non-WGS84 world
             metresPerDegreeLongitude = longitudeMetresPerDegree(coordinates.latitude);
@@ -1653,7 +1654,7 @@ bool testPosition(const uGeofence_t *pFence,
                 } else {
                     if (distanceMinMetres == distanceMinMetres) { // NAN test
                         pDynamic->lastStatus.distanceMillimetres = (int64_t) (distanceMinMetres * 1000);
-                        pDynamic->lastStatus.timeMs = uPortGetTickTimeMs();
+                        pDynamic->lastStatus.timeoutStart = uTimeoutStart();
                     }
                 }
             }
@@ -1695,7 +1696,7 @@ int32_t uGeofenceContextEnsure(uGeofenceContext_t **ppFenceContext)
             if (*ppFenceContext != NULL) {
                 memset(*ppFenceContext, 0, sizeof(**ppFenceContext));
                 (*ppFenceContext)->dynamic.lastStatus.distanceMillimetres = LLONG_MIN;
-                (*ppFenceContext)->dynamic.lastStatus.timeMs = uPortGetTickTimeMs();
+                (*ppFenceContext)->dynamic.lastStatus.timeoutStart = uTimeoutStart();
                 (*ppFenceContext)->dynamic.maxHorizontalSpeedMillimetresPerSecond = -1;
                 errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
             }
@@ -1901,7 +1902,7 @@ uGeofencePositionState_t uGeofenceContextTest(uDeviceHandle_t devHandle,
                 if ((dynamic.lastStatus.distanceMillimetres != LLONG_MIN) &&
                     (dynamic.lastStatus.distanceMillimetres < dynamicsMinDistance.lastStatus.distanceMillimetres)) {
                     dynamicsMinDistance.lastStatus.distanceMillimetres = dynamic.lastStatus.distanceMillimetres;
-                    dynamicsMinDistance.lastStatus.distanceMillimetres = uPortGetTickTimeMs();
+                    dynamicsMinDistance.lastStatus.timeoutStart = dynamic.lastStatus.timeoutStart;
                 }
                 if ((pFenceContext->pCallback != NULL) && (devHandle != NULL)) {
                     pFenceContext->pCallback(devHandle, pFence, pFence->pNameStr,

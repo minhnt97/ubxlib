@@ -26,7 +26,6 @@
  * 1 tab == 4 spaces!
  */
 
-
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
@@ -67,7 +66,7 @@
 #define configMINIMAL_STACK_SIZE                                                  ( 60 )
 // If you modify this value then make sure that the value of
 // HEAP_SIZE in the Makefile for a GCC build is modified to match.
-#define configTOTAL_HEAP_SIZE                                                     ( 53 * 1024 )
+#define configTOTAL_HEAP_SIZE                                                     ( (54 * 1024) + 512 )
 #define configMAX_TASK_NAME_LEN                                                   ( 16 )
 #define configUSE_16_BIT_TICKS                                                    0
 #define configIDLE_SHOULD_YIELD                                                   1
@@ -113,7 +112,6 @@
 
 /* Tickless idle/low power functionality. */
 
-
 /* Define to trap errors during development. */
 #if defined(DEBUG_NRF) || defined(DEBUG_NRF_USER)
 #define configASSERT( x )                                                         ASSERT(x)
@@ -150,7 +148,6 @@ INTERRUPT SAFE FREERTOS API FUNCTIONS FROM ANY INTERRUPT THAT HAS A HIGHER
 PRIORITY THAN THIS! (higher priorities are lower numeric values. */
 #define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY    _PRIO_APP_HIGH
 
-
 /* Interrupt priorities used by the kernel port layer itself.  These are generic
 to all Cortex-M ports, and do not rely on any particular library functions. */
 #define configKERNEL_INTERRUPT_PRIORITY                 configLIBRARY_LOWEST_INTERRUPT_PRIORITY
@@ -163,7 +160,6 @@ standard names - or at least those used in the unmodified vector table. */
 
 #define vPortSVCHandler                                                           SVC_Handler
 #define xPortPendSVHandler                                                        PendSV_Handler
-
 
 /*-----------------------------------------------------------
  * Settings that are generated automatically

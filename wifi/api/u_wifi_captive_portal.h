@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 u-blox
+ * Copyright 2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ extern "C" {
 /** The stack size of the task that runs a local DNS (created and
  * destroyed by uWifiCaptivePortal()).
  */
-# define U_WIFI_CAPTIVE_PORTAL_DNS_TASK_STACK_SIZE_BYTES 2048
+# define U_WIFI_CAPTIVE_PORTAL_DNS_TASK_STACK_SIZE_BYTES 2304
 #endif
 
 #ifndef U_WIFI_CAPTIVE_PORTAL_DNS_TASK_PRIORITY
@@ -76,7 +76,9 @@ typedef bool (*uWifiCaptivePortalKeepGoingCallback_t)(uDeviceHandle_t deviceHand
  * restarted to connect to the selected network. The process involves
  * starting a DNS server and a web server to handle the captive portal.
  *
- * This function is NOT threadsafe: there can be only one.
+ * This function is NOT thread-safe: there can be only one.
+ *
+ * Note: not all modules support this feature (e.g. ODIN-W2 does not).
  *
  * Note: this function, internally, calls uNetworkInterfaceUp() and so,
  * if it returns successfully, it is up to you to call

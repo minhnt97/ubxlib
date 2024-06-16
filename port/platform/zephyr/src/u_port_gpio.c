@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,17 @@
 #include "u_port_os.h"      // Needed by u_port_private.h
 #include "u_port_gpio.h"
 
-#include "kernel.h"
-#include "device.h"
-#include "drivers/gpio.h"
-#include "version.h"
+#include <version.h>
+
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#else
+#include <kernel.h>
+#include <device.h>
+#include <drivers/gpio.h>
+#endif
 
 #include "u_port_private.h"  // Down here because it needs to know about the Zephyr device tree
 
@@ -96,7 +103,6 @@ int32_t uPortGpioConfig(uPortGpioConfig_t *pConfig)
             break;
         }
 
-
         case U_PORT_GPIO_DIRECTION_INPUT_OUTPUT:
         case U_PORT_GPIO_DIRECTION_OUTPUT: {
             flags |= GPIO_OUTPUT;
@@ -144,7 +150,8 @@ int32_t uPortGpioConfig(uPortGpioConfig_t *pConfig)
     }
 
     if (!badConfig) {
-        zerr = gpio_pin_configure(pPort, pConfig->pin % GPIO_MAX_PINS_PER_PORT,
+        zerr = gpio_pin_configure(pPort,
+                                  (gpio_pin_t) (pConfig->pin % uPortPrivateGetGpioPortMaxPins()),
                                   flags);
         if (!zerr) {
             errorCode = U_ERROR_COMMON_SUCCESS;
@@ -165,7 +172,9 @@ int32_t uPortGpioSet(int32_t pin, int32_t level)
         return (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
     }
 
-    zerr = gpio_pin_set_raw(pPort, pin % GPIO_MAX_PINS_PER_PORT, (int)level);
+    zerr = gpio_pin_set_raw(pPort,
+                            (gpio_pin_t) (pin % uPortPrivateGetGpioPortMaxPins()),
+                            (int)level);
     if (zerr) {
         return (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
     }
@@ -190,8 +199,7 @@ int32_t uPortGpioGet(int32_t pin)
         return (int32_t)U_ERROR_COMMON_DEVICE_ERROR;
     }
 
-    return (val & (1 << (pin % GPIO_MAX_PINS_PER_PORT))) ? 1 : 0;
+    return (val & (1 << (pin % uPortPrivateGetGpioPortMaxPins()))) ? 1 : 0;
 }
 
 // End of file
-

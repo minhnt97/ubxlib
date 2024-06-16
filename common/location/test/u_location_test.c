@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,10 @@
  * naming rules that must be followed when using the U_PORT_TEST_FUNCTION()
  * macro.
  */
+
+// *** UCX MISSING FUNCTION ***
+// Currently no support for http in ucx, hence disabled
+#ifndef U_UCONNECT_GEN2
 
 #ifndef U_LOCATION_TEST_DISABLE
 
@@ -58,6 +62,8 @@
 #include "u_port_spi.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_network.h"
 #include "u_network_test_shared_cfg.h"
@@ -113,7 +119,7 @@
 
 /** Used for keepGoingCallback() timeout.
  */
-static int32_t gStopTimeMs = 0;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Keep track of the current network handle so that the
  * keepGoingCallback() can check it.
@@ -173,7 +179,8 @@ static bool keepGoingCallback(uDeviceHandle_t devHandle)
     bool keepGoing = true;
 
     U_PORT_TEST_ASSERT((gDevHandle == NULL) || (devHandle == gDevHandle));
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -282,16 +289,17 @@ static bool httpPostCheck(uLocationType_t locationType,
                           volatile int32_t *pHttpStatusCode)
 {
     bool success = true;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
 
     if ((pHttpContext != NULL) &&
         ((locationType == U_LOCATION_TYPE_CLOUD_GOOGLE) ||
          (locationType == U_LOCATION_TYPE_CLOUD_SKYHOOK) ||
          (locationType == U_LOCATION_TYPE_CLOUD_HERE))) {
         success = false;
-        startTimeMs = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         while ((*pHttpStatusCode != 200) &&
-               (uPortGetTickTimeMs() - startTimeMs < U_LOCATION_TEST_HTTP_TIMEOUT_SECONDS * 1000)) {
+               !uTimeoutExpiredSeconds(timeoutStart,
+                                       U_LOCATION_TEST_HTTP_TIMEOUT_SECONDS)) {
             uPortTaskBlock(100);
         }
         if (*pHttpStatusCode != 200) {
@@ -324,11 +332,11 @@ static void testBlocking(uDeviceHandle_t devHandle,
                          const uLocationTestCfg_t *pLocationCfg)
 {
     uLocation_t location;
-    int32_t startTimeMs = 0;
     int32_t timeoutMs = U_LOCATION_TEST_CFG_TIMEOUT_SECONDS * 1000;
     int32_t y;
     const uLocationAssist_t *pLocationAssist = NULL;
     const char *pAuthenticationTokenStr = NULL;
+    bool locationSupported = true;
 
     if (networkType == U_NETWORK_TYPE_WIFI) {
         timeoutMs = U_LOCATION_TEST_CFG_WIFI_TIMEOUT_SECONDS * 1000;
@@ -351,57 +359,63 @@ static void testBlocking(uDeviceHandle_t devHandle,
         // Try this a few times as obtaining position using Here over
         // WiFi can sometimes fail
         y = -1;
-        for (int32_t x = 0; (x < 3) && (y != 0); x++) {
-            startTimeMs = uPortGetTickTimeMs();
-            gStopTimeMs = startTimeMs + timeoutMs;
+        for (int32_t x = 0; (x < 3) && (y != 0) && locationSupported; x++) {
+            gTimeoutStop.timeoutStart = uTimeoutStart();
+            gTimeoutStop.durationMs = timeoutMs;
             y = uLocationGet(devHandle, locationType,
                              pLocationAssist,
                              pAuthenticationTokenStr,
                              &location,
                              keepGoingCallback);
-        }
-        // The location type is supported (a GNSS network always
-        // supports location, irrespective of the location type) so it
-        // should work
-        U_TEST_PRINT_LINE("uLocationGet() returned %d.", y);
-        U_PORT_TEST_ASSERT(y >= 0);
-        if (networkType != U_NETWORK_TYPE_WIFI) {
-            U_PORT_TEST_ASSERT(y == 0);
-        } else {
-            if (y != 0) {
-                // The cloud services used for Wifi-based location can sometimes
-                // be unable to determine position, which they indicate through
-                // a positive, non-200, HTTP status code
-                U_TEST_PRINT_LINE("*** WARNING *** cloud service was unable to determine"
-                                  " position (HTTP status code %d).", y);
+            if (y == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
+                locationSupported = false;
+                U_TEST_PRINT_LINE("*** WARNING *** location service not supported, not testing it.");
             }
         }
-        U_TEST_PRINT_LINE("location establishment took %d second(s).",
-                          (int32_t) (uPortGetTickTimeMs() - startTimeMs) / 1000);
-        // If we are running on a test cellular network we won't get position but
-        // we should always get time
-        if ((location.radiusMillimetres > 0) &&
-            (location.radiusMillimetres <= U_LOCATION_TEST_MAX_RADIUS_MILLIMETRES)) {
-            uLocationTestPrintLocation(&location);
-            U_PORT_TEST_ASSERT(location.latitudeX1e7 > INT_MIN);
-            U_PORT_TEST_ASSERT(location.longitudeX1e7 > INT_MIN);
-            // Don't check altitude as we might only have a 2D fix
-            U_PORT_TEST_ASSERT(location.radiusMillimetres > INT_MIN);
-            if (locationType == U_LOCATION_TYPE_GNSS) {
-                // Only get these for GNSS
-                U_PORT_TEST_ASSERT(location.speedMillimetresPerSecond > INT_MIN);
-                U_PORT_TEST_ASSERT(location.svs >= 0);
+        if (locationSupported) {
+            // The location type is supported (a GNSS network always
+            // supports location, irrespective of the location type) so it
+            // should work
+            U_TEST_PRINT_LINE("uLocationGet() returned %d.", y);
+            U_PORT_TEST_ASSERT(y >= 0);
+            if (networkType != U_NETWORK_TYPE_WIFI) {
+                U_PORT_TEST_ASSERT(y == 0);
             } else {
-                U_PORT_TEST_ASSERT(location.speedMillimetresPerSecond == INT_MIN);
-                U_PORT_TEST_ASSERT(location.svs == -1);
+                if (y != 0) {
+                    // The cloud services used for Wifi-based location can sometimes
+                    // be unable to determine position, which they indicate through
+                    // a positive, non-200, HTTP status code
+                    U_TEST_PRINT_LINE("*** WARNING *** cloud service was unable to determine"
+                                      " position (HTTP status code %d).", y);
+                }
             }
-        }
-        if (networkType != U_NETWORK_TYPE_WIFI) {
-            // Only Wifi doesn't return the time
-            U_TEST_PRINT_LINE("able to get time (%d).", (int32_t) location.timeUtc);
-            U_PORT_TEST_ASSERT(location.timeUtc > U_LOCATION_TEST_MIN_UTC_TIME);
-        } else {
-            U_PORT_TEST_ASSERT(location.timeUtc == -1);
+            U_TEST_PRINT_LINE("location establishment took %u second(s).",
+                              uTimeoutElapsedSeconds(gTimeoutStop.timeoutStart));
+            // If we are running on a test cellular network we won't get position but
+            // we should always get time
+            if ((location.radiusMillimetres > 0) &&
+                (location.radiusMillimetres <= U_LOCATION_TEST_MAX_RADIUS_MILLIMETRES)) {
+                uLocationTestPrintLocation(&location);
+                U_PORT_TEST_ASSERT(location.latitudeX1e7 > INT_MIN);
+                U_PORT_TEST_ASSERT(location.longitudeX1e7 > INT_MIN);
+                // Don't check altitude as we might only have a 2D fix
+                U_PORT_TEST_ASSERT(location.radiusMillimetres > INT_MIN);
+                if (locationType == U_LOCATION_TYPE_GNSS) {
+                    // Only get these for GNSS
+                    U_PORT_TEST_ASSERT(location.speedMillimetresPerSecond > INT_MIN);
+                    U_PORT_TEST_ASSERT(location.svs >= 0);
+                } else {
+                    U_PORT_TEST_ASSERT(location.speedMillimetresPerSecond == INT_MIN);
+                    U_PORT_TEST_ASSERT(location.svs == -1);
+                }
+            }
+            if (networkType != U_NETWORK_TYPE_WIFI) {
+                // Only Wifi doesn't return the time
+                U_TEST_PRINT_LINE("able to get time (%d).", (int32_t) location.timeUtc);
+                U_PORT_TEST_ASSERT(location.timeUtc > U_LOCATION_TEST_MIN_UTC_TIME);
+            } else {
+                U_PORT_TEST_ASSERT(location.timeUtc == -1);
+            }
         }
     } else {
         if (!U_NETWORK_TEST_TYPE_HAS_LOCATION(networkType)) {
@@ -449,21 +463,22 @@ static void testOneShot(uDeviceHandle_t devHandle,
                         uLocationType_t locationType,
                         const uLocationTestCfg_t *pLocationCfg)
 {
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     int32_t y;
-    int32_t timeoutMs = U_LOCATION_TEST_CFG_TIMEOUT_SECONDS * 1000;
+    int32_t timeoutSeconds = U_LOCATION_TEST_CFG_TIMEOUT_SECONDS;
     const uLocationAssist_t *pLocationAssist = NULL;
     const char *pAuthenticationTokenStr = NULL;
+    bool locationSupported = true;
 
     if (networkType == U_NETWORK_TYPE_WIFI) {
-        timeoutMs = U_LOCATION_TEST_CFG_WIFI_TIMEOUT_SECONDS * 1000;
+        timeoutSeconds = U_LOCATION_TEST_CFG_WIFI_TIMEOUT_SECONDS;
     }
 
     if (pLocationCfg != NULL) {
         pAuthenticationTokenStr = pLocationCfg->pAuthenticationTokenStr;
         pLocationAssist = pLocationCfg->pLocationAssist;
     }
-    startTimeMs = uPortGetTickTimeMs();
+    timeoutStart = uTimeoutStart();
 
     uLocationTestResetLocation(&gLocation);
     if (pLocationCfg != NULL) {
@@ -473,19 +488,23 @@ static void testOneShot(uDeviceHandle_t devHandle,
         // (e.g. on SARA-R412M-02B) return "generic error" if asked to establish
         // location again quickly after returning an answer
         U_TEST_PRINT_LINE("one-shot API.");
-        for (int32_t x = 3; (x > 0) && (gErrorCode != 0); x--) {
+        for (int32_t x = 3; (x > 0) && (gErrorCode != 0) && locationSupported; x--) {
             uLocationTestResetLocation(&gLocation);
             y = uLocationGetStart(devHandle, locationType,
                                   pLocationAssist,
                                   pAuthenticationTokenStr,
                                   locationCallback);
             U_TEST_PRINT_LINE("uLocationGetStart() returned %d.", y);
+            if (y == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
+                locationSupported = false;
+                U_TEST_PRINT_LINE("*** WARNING *** location service not supported, not testing it.");
+            }
             if (y == 0) {
                 U_TEST_PRINT_LINE("waiting up to %d second(s) for results from"
                                   " one-shot API...",
-                                  timeoutMs);
+                                  timeoutSeconds);
                 while ((gErrorCode == INT_MIN) &&
-                       (uPortGetTickTimeMs() - startTimeMs < timeoutMs)) {
+                       !uTimeoutExpiredSeconds(timeoutStart, timeoutSeconds)) {
                     // Location establishment status is only supported for cell locate
                     y = uLocationGetStatus(devHandle);
                     if (locationType == U_LOCATION_TYPE_CLOUD_CELL_LOCATE) {
@@ -497,8 +516,8 @@ static void testOneShot(uDeviceHandle_t devHandle,
                 }
 
                 if (gErrorCode == 0) {
-                    U_TEST_PRINT_LINE("location establishment took %d second(s).",
-                                      (int32_t) (uPortGetTickTimeMs() - startTimeMs) / 1000);
+                    U_TEST_PRINT_LINE("location establishment took %u second(s).",
+                                      uTimeoutElapsedSeconds(timeoutStart));
                     // If we are running on a cellular test network we might not
                     // get position but we should always get time
                     U_PORT_TEST_ASSERT(gDevHandle == devHandle);
@@ -538,20 +557,22 @@ static void testOneShot(uDeviceHandle_t devHandle,
                     U_PORT_TEST_ASSERT(y == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED);
                     gErrorCode = 0;
                 } else {
-                    U_PORT_TEST_ASSERT(false);
+                    U_PORT_TEST_ASSERT(!locationSupported);
                 }
             }
         }
-        U_PORT_TEST_ASSERT(gErrorCode >= 0);
-        if (networkType != U_NETWORK_TYPE_WIFI) {
-            U_PORT_TEST_ASSERT(gErrorCode == 0);
-        } else {
-            if (gErrorCode != 0) {
-                // The cloud services used for Wifi-based location can sometimes
-                // be unable to determine position, which they indicate through
-                // a positive, non-200, HTTP status code
-                U_TEST_PRINT_LINE("*** WARNING *** cloud service was unable to determine"
-                                  " position (HTTP status code %d).", gErrorCode);
+        U_PORT_TEST_ASSERT((gErrorCode >= 0) || !locationSupported);
+        if (locationSupported) {
+            if (networkType != U_NETWORK_TYPE_WIFI) {
+                U_PORT_TEST_ASSERT(gErrorCode == 0);
+            } else {
+                if (gErrorCode != 0) {
+                    // The cloud services used for Wifi-based location can sometimes
+                    // be unable to determine position, which they indicate through
+                    // a positive, non-200, HTTP status code
+                    U_TEST_PRINT_LINE("*** WARNING *** cloud service was unable to determine"
+                                      " position (HTTP status code %d).", gErrorCode);
+                }
             }
         }
     } else {
@@ -581,21 +602,22 @@ static void testContinuous(uDeviceHandle_t devHandle,
                            uLocationType_t locationType,
                            const uLocationTestCfg_t *pLocationCfg)
 {
-    int32_t startTimeMs;
-    int32_t timeoutMs = U_LOCATION_TEST_CFG_TIMEOUT_SECONDS * 1000;
+    uTimeoutStart_t timeoutStart;
+    int32_t timeoutSeconds = U_LOCATION_TEST_CFG_TIMEOUT_SECONDS;
     int32_t y;
     const uLocationAssist_t *pLocationAssist = NULL;
     const char *pAuthenticationTokenStr = NULL;
+    bool locationSupported = true;
 
     if (networkType == U_NETWORK_TYPE_WIFI) {
-        timeoutMs = U_LOCATION_TEST_CFG_WIFI_TIMEOUT_SECONDS * 1000;
+        timeoutSeconds = U_LOCATION_TEST_CFG_WIFI_TIMEOUT_SECONDS;
     }
 
     if (pLocationCfg != NULL) {
         pAuthenticationTokenStr = pLocationCfg->pAuthenticationTokenStr;
         pLocationAssist = pLocationCfg->pLocationAssist;
     }
-    startTimeMs = uPortGetTickTimeMs();
+    timeoutStart = uTimeoutStart();
 
     uLocationTestResetLocation(&gLocation);
     if (pLocationCfg != NULL) {
@@ -611,13 +633,17 @@ static void testContinuous(uDeviceHandle_t devHandle,
                                          pAuthenticationTokenStr,
                                          locationCallback);
         U_TEST_PRINT_LINE("uLocationGetContinuousStart() returned %d.", y);
+        if (y == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
+            locationSupported = false;
+            U_TEST_PRINT_LINE("*** WARNING *** location service not supported, not testing it.");
+        }
         if (y == 0) {
             U_TEST_PRINT_LINE("waiting up to %d second(s) to get at least %d"
                               " results from continuous API...",
-                              timeoutMs * U_LOCATION_TEST_CFG_CONTINUOUS_COUNT,
+                              timeoutSeconds * U_LOCATION_TEST_CFG_CONTINUOUS_COUNT,
                               U_LOCATION_TEST_CFG_CONTINUOUS_COUNT);
             while ((gCount < U_LOCATION_TEST_CFG_CONTINUOUS_COUNT) &&
-                   (uPortGetTickTimeMs() - startTimeMs < timeoutMs)) {
+                   !uTimeoutExpiredSeconds(timeoutStart, timeoutSeconds)) {
                 // Location establishment status is only supported for cell locate
                 y = uLocationGetStatus(devHandle);
                 if (locationType == U_LOCATION_TYPE_CLOUD_CELL_LOCATE) {
@@ -628,14 +654,9 @@ static void testContinuous(uDeviceHandle_t devHandle,
                 uPortTaskBlock(1000);
             }
 
-            // There has been something off going on with this test on Windows,
-            // so print a little extra diagnostic information here so that we
-            // can watch it
-            U_TEST_PRINT_LINE("startTimeMs is %d, ticks now is %d, gCount is %d.",
-                              startTimeMs, uPortGetTickTimeMs(), gCount);
             if (gCount >= U_LOCATION_TEST_CFG_CONTINUOUS_COUNT) {
-                U_TEST_PRINT_LINE("took %d second(s) to get location %d time(s).",
-                                  (int32_t) (uPortGetTickTimeMs() - startTimeMs) / 1000,
+                U_TEST_PRINT_LINE("took %u second(s) to get location %d time(s).",
+                                  uTimeoutElapsedSeconds(timeoutStart),
                                   gCount);
                 // If we are running on a cellular test network we might not
                 // get position but we should always get time
@@ -693,8 +714,10 @@ static void testContinuous(uDeviceHandle_t devHandle,
                 // uLocationGetContinuousStart() is allowed to return "not supported"
                 U_PORT_TEST_ASSERT(y == (int32_t) U_ERROR_COMMON_NOT_SUPPORTED);
 #else
-                U_TEST_PRINT_LINE("uLocationGetContinuousStart() returned %d, expecting 0.", y);
-                U_PORT_TEST_ASSERT(false);
+                if (locationSupported) {
+                    U_TEST_PRINT_LINE("uLocationGetContinuousStart() returned %d, expecting 0.", y);
+                    U_PORT_TEST_ASSERT(false);
+                }
 #endif
             }
         }
@@ -805,7 +828,8 @@ U_PORT_TEST_FUNCTION("[location]", "locationBasic")
                 }
                 if ((pTmp->networkType == U_NETWORK_TYPE_WIFI) && (gpHttpContext == NULL)) {
                     // For Wifi, since the same URC form is used to return
-                    // HTTP responses and location, we test that both succeed
+                    // HTTP responses and location, we test that both succeed,
+                    // where supported
                     U_PORT_TEST_ASSERT(uSecurityGetSerialNumber(devHandle, serialNumber) > 0);
                     // Create a complete URL from the domain name and port number
                     snprintf(urlBuffer, sizeof(urlBuffer), "%s:%d",
@@ -816,7 +840,10 @@ U_PORT_TEST_FUNCTION("[location]", "locationBasic")
                     connection.pResponseCallback = httpCallback;
                     connection.pResponseCallbackParam = (void *) &httpStatusCode;
                     gpHttpContext = pUHttpClientOpen(devHandle, &connection, NULL);
-                    U_PORT_TEST_ASSERT(gpHttpContext != NULL);
+                    if (gpHttpContext == NULL) {
+                        U_TEST_PRINT_LINE("*** WARNING *** not testing parallel HTTP"
+                                          " operation as HTTP is not supported.");
+                    }
                 }
             } else {
                 U_TEST_PRINT_LINE("%s is not supported on a %s network.",
@@ -923,5 +950,7 @@ U_PORT_TEST_FUNCTION("[location]", "locationCleanUp")
 }
 
 #endif // #ifndef U_LOCATION_TEST_DISABLE
+
+#endif // #ifndef U_UCONNECT_GEN2
 
 // End of file

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -133,7 +133,6 @@ void uPortTaskBlock(int32_t delayMs)
 {
     tx_thread_sleep(delayMs);
 }
-
 
 // Get the minimum free stack for a given task.
 int32_t uPortTaskStackMinFree(const uPortTaskHandle_t taskHandle)

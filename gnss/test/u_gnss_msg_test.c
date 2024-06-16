@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,8 @@
 #include "u_cfg_test_platform_specific.h"
 
 #include "u_error_common.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h" // Required by u_gnss_private.h
 
@@ -167,7 +169,7 @@ typedef struct {
 
 /** Used for keepGoingCallback() timeout.
  */
-static int32_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Handles.
  */
@@ -198,7 +200,8 @@ static bool keepGoingCallback(uDeviceHandle_t gnssHandle)
         gCallbackErrorCode = 1;
     }
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -414,7 +417,8 @@ U_PORT_TEST_FUNCTION("[gnssMsg]", "gnssMsgReceiveBlocking")
             U_TEST_PRINT_LINE("receiving response without message filter and with auto-buffer.");
             messageId.type = U_GNSS_PROTOCOL_UBX;
             messageId.id.ubx = U_GNSS_UBX_MESSAGE(U_GNSS_UBX_MESSAGE_CLASS_ALL, U_GNSS_UBX_MESSAGE_ID_ALL);
-            gStopTimeMs = uPortGetTickTimeMs() + U_GNSS_MSG_TEST_MESSAGE_RECEIVE_TIMEOUT_MS;
+            gTimeoutStop.timeoutStart = uTimeoutStart();
+            gTimeoutStop.durationMs = U_GNSS_MSG_TEST_MESSAGE_RECEIVE_TIMEOUT_MS;
             pBuffer3 = NULL;
             gCallbackErrorCode = 0;
             x = uGnssMsgReceive(gnssHandle, &messageId, &pBuffer3, 0,
@@ -698,7 +702,7 @@ U_PORT_TEST_FUNCTION("[gnssMsg]", "gnssMsgReceiveNonBlocking")
                 U_TEST_PRINT_LINE("%d byte(s) lost at the input to the ring-buffer during that test.", c);
                 U_TEST_PRINT_LINE("%d byte(s) lost by the asynchronous read task during that test.", d);
                 if (a != U_ERROR_COMMON_NOT_SUPPORTED) {
-                    U_TEST_PRINT_LINE("the minimum stack of the callback task  was %d.", a);
+                    U_TEST_PRINT_LINE("the minimum stack of the callback task was %d.", a);
                 }
                 U_TEST_PRINT_LINE("the callback error code was %d.", gCallbackErrorCode);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,6 +74,13 @@ void uCellSecPrivateLink(void);
 
 /** Get whether a cellular module supports u-blox security services
  * or not.
+ *
+ * Note: if the module is switched on it will be interrogated to
+ * confirm that u-blox security services are supported, else
+ * the return value will be dictated by an internal table which will
+ * may be "true" for all variants when particular module variants
+ * do not, in fact, support u-blox security.  Hence it is best to
+ * ensure that the module is on before calling this function.
  *
  * @param cellHandle the handle of the cellular instance.
  * @return           true if the cellular module supports u-blox

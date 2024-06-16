@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,10 @@
  * and then use a GNSS module attached to the cellular module to perform
  * a location fix continuously, i.e. this example ONLY applies if your
  * GNSS module is attached to the cellular module and NOT to this MCU.
+ *
+ * Note that this example will NOT work for LENA-R8xxxM10 since LENA-R8
+ * does not support CMUX access to the built-in GNSS chip and that is
+ * required for continuous location.
  *
  * The choice of module and the choice of platform on which this
  * code runs is made at build time, see the README.md for
@@ -58,13 +62,18 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
+// ZEPHYR USERS may prefer to set the device and network
+// configuration from their device tree, rather than in this C
+// code: see /port/platform/zephyr/README.md for instructions on
+// how to do that.
+
 // Cellular configuration.
 // Set U_CFG_TEST_CELL_MODULE_TYPE to your module type,
 // chosen from the values in cell/api/u_cell_module_type.h
 //
 // Note that the pin numbers are those of the MCU: if you
 // are using an MCU inside a u-blox module the IO pin numbering
-// for the module is likely different that from the MCU: check
+// for the module is likely different to that of the MCU: check
 // the data sheet for the module to determine the mapping.
 
 #if defined(U_CFG_TEST_CELL_MODULE_TYPE) && defined(U_CFG_TEST_GNSS_MODULE_TYPE) && (U_CFG_APP_GNSS_UART < 0) && (U_CFG_APP_GNSS_I2C < 0) && (U_CFG_APP_GNSS_SPI < 0)
@@ -87,10 +96,10 @@ static const uDeviceCfg_t gDeviceCfg = {
         .cfgUart = {
             .uart = U_CFG_APP_CELL_UART,
             .baudRate = U_CELL_UART_BAUD_RATE,
-            .pinTxd = U_CFG_APP_PIN_CELL_TXD,
-            .pinRxd = U_CFG_APP_PIN_CELL_RXD,
-            .pinCts = U_CFG_APP_PIN_CELL_CTS,
-            .pinRts = U_CFG_APP_PIN_CELL_RTS,
+            .pinTxd = U_CFG_APP_PIN_CELL_TXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinRxd = U_CFG_APP_PIN_CELL_RXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinCts = U_CFG_APP_PIN_CELL_CTS,  // Use -1 if on Zephyr
+            .pinRts = U_CFG_APP_PIN_CELL_RTS,  // Use -1 if on Zephyr
 #ifdef U_CFG_APP_UART_PREFIX
             .pPrefix = U_PORT_STRINGIFY_QUOTED(U_CFG_APP_UART_PREFIX) // Relevant for Linux only
 #else

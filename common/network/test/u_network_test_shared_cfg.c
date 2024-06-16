@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -91,6 +91,20 @@
  */
 #define U_TEST_PRINT_LINE(format, ...) uPortLog(U_TEST_PREFIX format "\n", ##__VA_ARGS__)
 
+#ifndef U_CFG_APP_I2C_MAX_SEGMENT_SIZE
+/** Make sure that there is a default maximum I2C segment size (where
+ * 0 means no segmentation).
+ */
+# define U_CFG_APP_I2C_MAX_SEGMENT_SIZE 0
+#endif
+
+#ifndef U_CFG_APP_SPI_MAX_SEGMENT_SIZE
+/** Make sure that there is a default maximum SPI segment size (where
+ * 0 means no segmentation).
+ */
+# define U_CFG_APP_SPI_MAX_SEGMENT_SIZE 0
+#endif
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -152,6 +166,40 @@ static const uDeviceCfg_t gDeviceCfgCell = {
 #endif
 };
 
+/** Optional PPP bit of cellular network configuration used during testing.
+ */
+#if defined(U_CFG_TEST_CELL_MODULE_TYPE) && defined(U_CELL_TEST_CFG_UART_PPP)
+static const uDeviceCfgUart_t gUartPpp = {
+    .uart = U_CELL_TEST_CFG_UART_PPP,
+    .baudRate = U_CELL_UART_BAUD_RATE,
+# ifdef U_CFG_APP_PIN_CELL_PPP_TXD
+    .pinTxd = U_CFG_APP_PIN_CELL_PPP_TXD,
+# else
+    .pinTxd = -1,
+# endif
+# ifdef U_CFG_APP_PIN_CELL_PPP_RXD
+    .pinRxd = U_CFG_APP_PIN_CELL_PPP_RXD,
+# else
+    .pinRxd = -1,
+# endif
+# ifdef U_CFG_APP_PIN_CELL_PPP_CTS
+    .pinCts = U_CFG_APP_PIN_CELL_PPP_CTS,
+# else
+    .pinCts = -1,
+# endif
+# ifdef U_CFG_APP_PIN_CELL_PPP_RTS
+    .pinRts = U_CFG_APP_PIN_CELL_PPP_RTS,
+# else
+    .pinRts = -1,
+# endif
+# ifdef U_CFG_APP_UART_PREFIX
+    .pPrefix = U_PORT_STRINGIFY_QUOTED(U_CFG_APP_UART_PREFIX) // Relevant for Linux only
+# else
+    .pPrefix = NULL
+# endif
+}
+#endif
+
 /** Cellular network configuration used during testing.
  */
 static const uNetworkCfgCell_t gNetworkCfgCell = {
@@ -178,6 +226,11 @@ static const uNetworkCfgCell_t gNetworkCfgCell = {
     .authenticationMode = (int32_t) U_CELL_TEST_CFG_AUTHENTICATION_MODE,
 # else
     .authenticationMode = 0,
+# endif
+# ifdef U_CELL_TEST_CFG_UART_PPP
+    .pUartPpp = &gUartPpp,
+# else
+    .pUartPpp = NULL,
 # endif
 #else
     .type = U_NETWORK_TYPE_NONE
@@ -237,7 +290,11 @@ static const uNetworkCfgBle_t gNetworkCfgBle = {
 #if U_SHORT_RANGE_TEST_BLE()
     .type = U_NETWORK_TYPE_BLE,
     .role = U_CFG_APP_SHORT_RANGE_ROLE,
+# ifndef U_CFG_TEST_BLE_DISABLE_SPS
     .spsServer = true
+# else
+    .spsServer = false
+# endif
 #else
     .type = U_NETWORK_TYPE_NONE
 #endif
@@ -262,7 +319,8 @@ static const uDeviceCfg_t gDeviceCfgGnss = {
         .cfgI2c = {
             .i2c = U_CFG_APP_GNSS_I2C,
             .pinSda = U_CFG_APP_PIN_GNSS_SDA,
-            .pinScl = U_CFG_APP_PIN_GNSS_SCL
+            .pinScl = U_CFG_APP_PIN_GNSS_SCL,
+            .maxSegmentSize = U_CFG_APP_I2C_MAX_SEGMENT_SIZE
         }
     }
 # elif (U_CFG_APP_GNSS_SPI >= 0)
@@ -273,7 +331,8 @@ static const uDeviceCfg_t gDeviceCfgGnss = {
             .pinMosi = U_CFG_APP_PIN_GNSS_SPI_MOSI,
             .pinMiso = U_CFG_APP_PIN_GNSS_SPI_MISO,
             .pinClk = U_CFG_APP_PIN_GNSS_SPI_CLK,
-            .device = U_COMMON_SPI_CONTROLLER_DEVICE_DEFAULTS(U_CFG_APP_PIN_GNSS_SPI_SELECT)
+            .device = U_COMMON_SPI_CONTROLLER_DEVICE_DEFAULTS(U_CFG_APP_PIN_GNSS_SPI_SELECT),
+            .maxSegmentSize = U_CFG_APP_SPI_MAX_SEGMENT_SIZE
         }
     }
 # else
@@ -281,7 +340,7 @@ static const uDeviceCfg_t gDeviceCfgGnss = {
     .transportCfg = {
         .cfgUart = {
             .uart = U_CFG_APP_GNSS_UART,
-            .baudRate = U_GNSS_UART_BAUD_RATE,
+            .baudRate = U_NETWORK_TEST_GNSS_BAUD_RATE,
             .pinTxd = U_CFG_APP_PIN_GNSS_TXD,
             .pinRxd = U_CFG_APP_PIN_GNSS_RXD,
             .pinCts = U_CFG_APP_PIN_GNSS_CTS,
@@ -336,7 +395,7 @@ static uNetworkTestDevice_t gUNetworkTest[] = {
         .network =
         {
             {.type = U_NETWORK_TYPE_CELL, .pCfg = (const void *) &gNetworkCfgCell},
-#if defined(U_CFG_TEST_GNSS_MODULE_TYPE) && (U_CFG_APP_GNSS_UART < 0) && (U_CFG_APP_GNSS_I2C < 0)
+#if defined(U_CFG_TEST_GNSS_MODULE_TYPE) && (U_CFG_APP_GNSS_UART < 0) && (U_CFG_APP_GNSS_I2C < 0) && (U_CFG_APP_GNSS_SPI < 0)
             {.type = U_NETWORK_TYPE_GNSS, .pCfg = (const void *) &gNetworkCfgGnss}
 #else
             {.type = U_NETWORK_TYPE_NONE, .pCfg = NULL}
@@ -609,6 +668,15 @@ bool uNetworkTestHasHttp(uDeviceType_t deviceType,
     (void) deviceType;
     (void) moduleType;
 
+#ifdef U_UCONNECT_GEN2
+    if (deviceType == U_DEVICE_TYPE_SHORT_RANGE) {
+        // *** UCX MISSING FUNCTION ***
+        // No http support in ucx yet
+        return false;
+    }
+
+#endif
+
     // The LARA-R6 module on the test system fails this
     // test intermittently; LARA-R6 seems to forget the
     // server host name part of the way through the test run,
@@ -673,6 +741,16 @@ bool uNetworkTestHasStatusCallback(uDeviceType_t deviceType,
     (void) moduleType;
     return (networkType == U_NETWORK_TYPE_BLE) || (networkType == U_NETWORK_TYPE_WIFI) ||
            (networkType == U_NETWORK_TYPE_CELL);
+}
+
+// Return true if the configuration supports a PPP connection.
+bool uNetworkTestHasPpp(uDeviceType_t deviceType,
+                        uNetworkType_t networkType,
+                        int32_t moduleType)
+{
+    (void) deviceType;
+    (void) moduleType;
+    return (networkType == U_NETWORK_TYPE_CELL);
 }
 
 // End of file

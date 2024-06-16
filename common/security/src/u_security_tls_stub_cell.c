@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,6 +54,12 @@ U_WEAK uCellSecTlsContext_t *pUCellSecSecTlsAdd(uDeviceHandle_t cellHandle)
 U_WEAK void uCellSecTlsRemove(uCellSecTlsContext_t *pContext)
 {
     (void) pContext;
+}
+
+U_WEAK bool uCellSecTlsCipherSuiteMoreThanOne(uDeviceHandle_t cellHandle)
+{
+    (void) cellHandle;
+    return false;
 }
 
 U_WEAK int32_t uCellSecTlsResetLastError()
@@ -142,6 +148,5 @@ U_WEAK int32_t uCellSecTlsSniSet(const uCellSecTlsContext_t *pContext,
     (void) pSni;
     return (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
 }
-
 
 // End of file

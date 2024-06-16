@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,18 @@
 # include "u_cfg_override.h" // For a customer's configuration override
 #endif
 
-#include "random/rand32.h"
+#include <version.h>
+
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,5,0)
+#include <zephyr/random/random.h>
+#else
+#include <zephyr/random/rand32.h>
+#endif
+#else
+#include <random/rand32.h>
+#endif
+
 #include "string.h"
 
 #include "u_assert.h"

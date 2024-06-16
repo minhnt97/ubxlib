@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,11 +39,20 @@
  * TYPES
  * -------------------------------------------------------------- */
 
+/*  IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT
+ *
+ * NOTE TO MAINTAINERS: if you change this enum you will need to
+ * change u-blox,ubxlib-device-gnss.yaml AND
+ * u-blox,ubxlib-network-gnss.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you will also
+ * need to update the table in the Zephyr u_port_board_cfg.c file
+ * that maps string to enum.
+ */
 /** The possible types of GNSS module.
  * Note: if you add a new module type here, check the
  * U_GNSS_PRIVATE_MODULE_xxx macros in u_gnss_private.h
  * to see if they need updating and also update the
- * tables in u_gnss_private.c.
+ * tables in u_gnss_private.c and u_gnss_pwr.c.
  */
 //lint -estring(788, uGnssModuleType_t::U_GNSS_MODULE_TYPE_MAX_NUM)
 // Suppress not used within defaulted switch
@@ -51,6 +60,17 @@ typedef enum {
     U_GNSS_MODULE_TYPE_M8  = 0,
     U_GNSS_MODULE_TYPE_M9  = 1,
     U_GNSS_MODULE_TYPE_M10 = 2,
+    // Add any new module types here, before U_GNSS_MODULE_TYPE_ANY, assigning
+    // them to specific values.
+    // IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT: see note above.
+    U_GNSS_MODULE_TYPE_ANY, /**< when this module type is used the code will
+                                 interrogate the module and chose the correct
+                                 module type by itself; should this fail, for
+                                 example because you are using a module type which
+                                 is sufficiently close to a supported module type
+                                 to work but the ID string it returns is too
+                                 different to be detected, then you should chose
+                                 the specific module type you want instead. */
     U_GNSS_MODULE_TYPE_MAX_NUM
 } uGnssModuleType_t;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,13 +78,18 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
+// ZEPHYR USERS may prefer to set the device and network
+// configuration from their device tree, rather than in this C
+// code: see /port/platform/zephyr/README.md for instructions on
+// how to do that.
+
 // Cellular configuration.
 // Set U_CFG_TEST_CELL_MODULE_TYPE to your module type,
 // chosen from the values in cell/api/u_cell_module_type.h
 //
 // Note that the pin numbers are those of the MCU: if you
 // are using an MCU inside a u-blox module the IO pin numbering
-// for the module is likely different that from the MCU: check
+// for the module is likely different to that of the MCU: check
 // the data sheet for the module to determine the mapping.
 
 // DEVICE i.e. module/chip configuration: in this case a cellular
@@ -106,10 +111,10 @@ static const uDeviceCfg_t gDeviceCfg = {
         .cfgUart = {
             .uart = U_CFG_APP_CELL_UART,
             .baudRate = U_CELL_UART_BAUD_RATE,
-            .pinTxd = U_CFG_APP_PIN_CELL_TXD,
-            .pinRxd = U_CFG_APP_PIN_CELL_RXD,
-            .pinCts = U_CFG_APP_PIN_CELL_CTS,
-            .pinRts = U_CFG_APP_PIN_CELL_RTS,
+            .pinTxd = U_CFG_APP_PIN_CELL_TXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinRxd = U_CFG_APP_PIN_CELL_RXD,  // Use -1 if on Zephyr or Linux or Windows
+            .pinCts = U_CFG_APP_PIN_CELL_CTS,  // Use -1 if on Zephyr
+            .pinRts = U_CFG_APP_PIN_CELL_RTS,  // Use -1 if on Zephyr
 #ifdef U_CFG_APP_UART_PREFIX
             .pPrefix = U_PORT_STRINGIFY_QUOTED(U_CFG_APP_UART_PREFIX) // Relevant for Linux only
 #else
@@ -123,7 +128,7 @@ static const uNetworkCfgCell_t gNetworkCfg = {
     .type = U_NETWORK_TYPE_CELL,
     .pApn = NULL, /* APN: NULL to accept default.  If using a Thingstream SIM enter "tsiot" here */
     .timeoutSeconds = 240 /* Connection timeout in seconds */
-    // There are four additional fields here which we do NOT set,
+    // There are six additional fields here which we do NOT set,
     // we allow the compiler to set them to 0 and all will be fine.
     // The fields are:
     //
@@ -153,6 +158,18 @@ static const uNetworkCfgCell_t gNetworkCfg = {
     //   figuring out the authentication mode automatically but
     //   you ONLY NEED TO WORRY ABOUT IT if you were given that user
     //   name and password with the APN (which is thankfully not usual).
+    //
+    // - "pMccMnc": ONLY required if you wish to connect to a specific
+    //   MCC/MNC rather than to the best available network; should point
+    //   to the null-terminated string giving the MCC and MNC of the PLMN
+    //   to use (for example "23410").
+    //
+    // - "pUartPpp": ONLY REQUIRED if U_CFG_PPP_ENABLE is defined AND
+    //   you wish to run a PPP interface to the cellular module over a
+    //   DIFFERENT serial port to that which was specified in the device
+    //   configuration passed to uDeviceOpen().  This is useful if you
+    //   are using the USB interface of a cellular module, which does not
+    //   support the CMUX protocol that multiplexes PPP with AT.
 };
 
 // Flag that allows us to check if E-DRX has been set.
@@ -201,6 +218,9 @@ U_PORT_TEST_FUNCTION("[example]", "exampleCellPowerSavingEDrx")
     bool onMyRat = true;
     int32_t x = -1;
     int32_t returnCode;
+    bool eDrxOnNotOff = false;
+    int32_t eDrxSeconds = -1;
+    int32_t pagingWindowSeconds = -1;
 
     // Initialise the APIs we will need
     uPortInit();
@@ -250,9 +270,32 @@ U_PORT_TEST_FUNCTION("[example]", "exampleCellPowerSavingEDrx")
                     }
 
                     if (gEDrxSet) {
-                        uPortLog("### The E-DRX settings have been agreed.\n");
+                        uPortLog("### Callback called, the E-DRX settings"
+                                 " have been agreed.\n");
                     } else {
-                        uPortLog("### Unable to switch E-DRX on!\n");
+                        // The callback has not been called, which might
+                        // be the case, network dependent, dependent on
+                        // the timing of RRC connections being dropped
+                        // etc.; call the API instead
+                        if (uCellPwrGetEDrx(devHandle, MY_RAT,
+                                            &eDrxOnNotOff, &eDrxSeconds,
+                                            &pagingWindowSeconds) == 0) {
+                            if (eDrxOnNotOff) {
+                                uPortLog("### The E-DRX settings have been agreed");
+                                if (eDrxSeconds >= 0) {
+                                    uPortLog(", assigned E-DRX %d seconds", eDrxSeconds);
+                                }
+                                if (pagingWindowSeconds >= 0) {
+                                    uPortLog(", assigned paging window %d seconds",
+                                             pagingWindowSeconds);
+                                }
+                                uPortLog(".\n");
+                            } else {
+                                uPortLog("### Unable to switch E-DRX on!\n");
+                            }
+                        } else {
+                            uPortLog("### Unable to get assigned E-DRX!\n");
+                        }
                     }
 
                     // When finished with the network layer
@@ -285,7 +328,8 @@ U_PORT_TEST_FUNCTION("[example]", "exampleCellPowerSavingEDrx")
     uPortLog("### Done.\n");
 
 # ifndef U_CFG_CELL_DISABLE_UART_POWER_SAVING
-    // For u-blox internal testing only
+    // For u-blox internal testing only; in our test setup we
+    // can be sure that the callback should have been called
     EXAMPLE_FINAL_STATE((x < 0) || gEDrxSet);
 #  ifdef U_PORT_TEST_ASSERT
     // We don't want E-DRX on for our internal testing, so

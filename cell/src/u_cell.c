@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,10 +37,13 @@
 
 #include "u_error_common.h"
 
+#include "u_port.h"
 #include "u_port_debug.h"
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_gpio.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -60,6 +63,7 @@
 #include "u_cell_private.h" // don't change it
 #include "u_cell_mux.h"
 #include "u_cell_mux_private.h"
+#include "u_cell_ppp_private.h"
 
 // The headers below necessary to work around an Espressif linker problem, see uCellInit()
 #include "u_sock.h"
@@ -143,6 +147,8 @@ static void removeCellInstance(uCellPrivateInstance_t *pInstance)
             uPortFree(pInstance->pFotaContext);
             // Free any HTTP context
             uCellPrivateHttpRemoveContext(pInstance);
+            // Free any PPP context
+            uCellPppPrivateRemoveContext(pInstance);
             // Free any CMUX context
             uCellMuxPrivateRemoveContext(pInstance);
             // Free any CellTime context
@@ -294,6 +300,8 @@ int32_t uCellAdd(uCellModuleType_t moduleType,
                     pInstance->pinPwrOn = pinPwrOn;
                     pInstance->pinVInt = pinVInt;
                     pInstance->pinDtrPowerSaving = -1;
+                    pInstance->lastCfunFlipTime = uTimeoutStart();
+                    pInstance->lastDtrPinToggleTime = uTimeoutStart();
                     for (size_t x = 0;
                          x < sizeof(pInstance->networkStatus) / sizeof(pInstance->networkStatus[0]);
                          x++) {
@@ -302,14 +310,9 @@ int32_t uCellAdd(uCellModuleType_t moduleType,
                     uCellPrivateClearRadioParameters(&(pInstance->radioParameters), false);
                     pInstance->pModule = &(gUCellPrivateModuleList[moduleType]);
                     pInstance->sockNextLocalPort = -1;
-                    if (U_CELL_PRIVATE_HAS(pInstance->pModule,
-                                           U_CELL_PRIVATE_FEATURE_AUTHENTICATION_MODE_AUTOMATIC)) {
-                        // Set automatic authentication mode where supported
-                        pInstance->authenticationMode = U_CELL_NET_AUTHENTICATION_MODE_AUTOMATIC;
-                    }
                     pInstance->deepSleepBlockedBy = -1;
                     pInstance->gnssAidMode = U_CELL_LOC_GNSS_AIDING_TYPES;
-                    pInstance->gnssSystemTypesBitMap = U_CELL_LOC_GNSS_SYSTEM_TYPES;
+                    pInstance->gnssSystemTypesBitMap = pInstance->pModule->gnssSystemTypesBitMap;
 
                     // Now set up the pins
                     uPortLog("U_CELL: initialising with enable power pin ");
@@ -407,10 +410,7 @@ int32_t uCellAdd(uCellModuleType_t moduleType,
                     }
                     // With that done, set up the AT client for this module
                     if (platformError == 0) {
-                        uAtClientTimeoutSet(atHandle,
-                                            pInstance->pModule->atTimeoutSeconds * 1000);
-                        uAtClientDelaySet(atHandle,
-                                          pInstance->pModule->commandDelayDefaultMs);
+                        uCellPrivateModuleSpecificSetting(pInstance);
 #ifndef U_CFG_CELL_DISABLE_UART_POWER_SAVING
                         // Here we set the power-saving wake-up handler but note
                         // that this might be _removed_ during the power-on
@@ -521,6 +521,117 @@ int32_t uCellAtCommandDelaySet(uDeviceHandle_t cellHandle, int32_t delayMs)
         pInstance = pUCellPrivateGetInstance(cellHandle);
         if ((pInstance != NULL) && (delayMs >= 0)) {
             uAtClientDelaySet(pInstance->atHandle, delayMs);
+            errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
+    }
+
+    return errorCode;
+}
+
+// Get the detailed timings used at the AT interface.
+int32_t uCellAtCommandTimingGet(uDeviceHandle_t cellHandle,
+                                int32_t *pDelayMs,
+                                int32_t *pDefaultCommandTimeoutSeconds,
+                                int32_t *pUrcTimeoutMs,
+                                int32_t *pReadRetryDelayMs)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    uCellPrivateInstance_t *pInstance;
+    uAtClientHandle_t atHandle;
+
+    if (gUCellPrivateMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gUCellPrivateMutex);
+
+        errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        pInstance = pUCellPrivateGetInstance(cellHandle);
+        if (pInstance != NULL) {
+            atHandle = pInstance->atHandle;
+            if (pDelayMs != NULL) {
+                *pDelayMs = uAtClientDelayGet(atHandle);
+            }
+            if (pDefaultCommandTimeoutSeconds != NULL) {
+                *pDefaultCommandTimeoutSeconds = uAtClientTimeoutGet(atHandle) / 1000;
+            }
+            if (pUrcTimeoutMs != NULL) {
+                *pUrcTimeoutMs = uAtClientTimeoutUrcGet(atHandle);
+            }
+            if (pReadRetryDelayMs != NULL) {
+                *pReadRetryDelayMs = uAtClientReadRetryDelayGet(atHandle);
+            }
+            errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
+    }
+
+    return errorCode;
+}
+
+// Set the detailed timings used at the AT interface.
+int32_t uCellAtCommandTimingSet(uDeviceHandle_t cellHandle,
+                                int32_t delayMs,
+                                int32_t defaultCommandTimeoutSeconds,
+                                int32_t urcTimeoutMs,
+                                int32_t readRetryDelayMs)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    uCellPrivateInstance_t *pInstance;
+    uAtClientHandle_t atHandle;
+
+    if (gUCellPrivateMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gUCellPrivateMutex);
+
+        errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        pInstance = pUCellPrivateGetInstance(cellHandle);
+        if (pInstance != NULL) {
+            atHandle = pInstance->atHandle;
+            if (delayMs >= 0) {
+                uAtClientDelaySet(atHandle, delayMs);
+            }
+            if (defaultCommandTimeoutSeconds >= 0) {
+                uAtClientTimeoutSet(atHandle,
+                                    defaultCommandTimeoutSeconds * 1000);
+            }
+            if (urcTimeoutMs >= 0) {
+                uAtClientTimeoutUrcSet(atHandle, urcTimeoutMs);
+            }
+            if (readRetryDelayMs >= 0) {
+                uAtClientReadRetryDelaySet(atHandle, readRetryDelayMs);
+            }
+            errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
+    }
+
+    return errorCode;
+}
+
+// Set the detailed timings to default values.
+int32_t uCellAtCommandTimingSetDefault(uDeviceHandle_t cellHandle)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    uCellPrivateInstance_t *pInstance;
+    uAtClientHandle_t atHandle;
+
+    if (gUCellPrivateMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gUCellPrivateMutex);
+
+        errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        pInstance = pUCellPrivateGetInstance(cellHandle);
+        if (pInstance != NULL) {
+            atHandle = pInstance->atHandle;
+            uAtClientDelaySet(atHandle,
+                              pInstance->pModule->commandDelayDefaultMs);
+            uAtClientTimeoutSet(atHandle,
+                                pInstance->pModule->atTimeoutSeconds * 1000);
+            uAtClientTimeoutUrcSet(atHandle, U_AT_CLIENT_URC_TIMEOUT_MS);
+            uAtClientReadRetryDelaySet(atHandle, U_AT_CLIENT_STREAM_READ_RETRY_DELAY_MS);
             errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
         }
 

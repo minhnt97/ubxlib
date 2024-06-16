@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,8 +42,10 @@
 #include "u_port_heap.h"
 #include "u_port_uart.h"
 #include "u_port_gpio.h"
-#include "u_port_crypto.h"
 #include "u_port_event_queue.h"
+#include "u_port_debug.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -60,6 +62,7 @@
 #include "u_cell_cfg.h"
 #include "u_cell_http.h"
 #include "u_cell_time.h"
+#include "u_cell_loc.h"
 #include "u_cell_http_private.h"
 #include "u_cell_pwr_private.h"
 #include "u_cell_time_private.h"
@@ -96,7 +99,7 @@ uPortMutexHandle_t gUCellPrivateMutex = NULL;
  */
 const uCellPrivateModule_t gUCellPrivateModuleList[] = {
     {
-        U_CELL_MODULE_TYPE_SARA_U201, 1 /* Pwr On pull ms */, 1500 /* Pwr off pull ms */,
+        U_CELL_MODULE_TYPE_SARA_U201, 10 /* Pwr On pull ms */, 1500 /* Pwr off pull ms */,
         5 /* Boot wait */, 5 /* Min awake */, 5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
         50 /* Cmd wait ms */, 2000 /* Resp max wait ms */, 0 /* radioOffCfun */, 75 /* resetHoldMilliseconds */,
         2 /* Simultaneous RATs */,
@@ -113,13 +116,18 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CTS_CONTROL)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SOCK_SET_LOCAL_PORT)           |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)             |
-         // CMUX is supported here but we do not test it hence it is not marked as supported
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                          |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)            |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                         |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_AUTHENTICATION_MODE_AUTOMATIC) |
-         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP)                          |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_PPP) /* features */
         ),
         6, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID; we don't support anything other than -1 for
+             * the solely UPSD-type context activation used on SARA-U201 */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_SARA_R410M_02B, 300 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
@@ -143,12 +151,17 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FOTA)                    |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)       |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                    |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)      |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         // PPP is supported by the module but we do not test its integration with
+         // ubxlib and hence it is not marked as supported
         ),
         3, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_SARA_R412M_02B, 300 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
@@ -177,12 +190,17 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FOTA)                                |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)                  |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         // PPP is supported by the module but we do not test its integration with
+         // ubxlib and hence it is not marked as supported
         ),
         3, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_SARA_R412M_03B, 300 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
@@ -202,11 +220,16 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_EDRX)                                |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)                  |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         // PPP is supported by the module but we do not test its integration with
+         // ubxlib and hence it is not marked as supported
         ),
         3, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_SARA_R5, 1500 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
@@ -248,14 +271,18 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FOTA)                                |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)                  |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SNR_REPORTED)                        |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_AUTHENTICATION_MODE_AUTOMATIC)       |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                               |
-         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_PPP) /* features */
         ),
         4, /* Default CMUX channel for GNSS */
-        16 /* AT+CFUN reboot command */
+        16, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_SARA_R410M_03B, 300 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
@@ -277,17 +304,24 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_EDRX)                                |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                   |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)                  |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         // PPP is supported by the module but we do not test its integration with
+         // ubxlib and hence it is not marked as supported
         ),
         3, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_SARA_R422, 300 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
         5 /* Boot wait */, 30 /* Min awake */, 35 /* Pwr down wait */, 10 /* Reboot wait */, 10 /* AT timeout */,
-        100 /* Cmd wait ms */, 3000 /* Resp max wait ms */, 4 /* radioOffCfun */,  16500 /* resetHoldMilliseconds */,
+        // Note: "Cmd wait ms" is set to 100 for the other SARA-R4 series modules;
+        // testing has shown that 20 works for SARA-R422.
+        20 /* Cmd wait ms */, 3000 /* Resp max wait ms */, 4 /* radioOffCfun */,  16500 /* resetHoldMilliseconds */,
         3 /* Simultaneous RATs */,
         ((1ULL << (int32_t) U_CELL_NET_RAT_GSM_GPRS_EGPRS) |
          (1ULL << (int32_t) U_CELL_NET_RAT_CATM1)          |
@@ -318,18 +352,22 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FOTA)                                  |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                     |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                  |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)                    |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SNR_REPORTED)                          |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                                 |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                                 |
-         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP)                                  |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_PPP) /* features */
         ),
         3, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_LARA_R6, 300 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
         10 /* Boot wait */, 30 /* Min awake */, 35 /* Pwr down wait */, 10 /* Reboot wait */, 10 /* AT timeout */,
-        100 /* Cmd wait ms */, 3000 /* Resp max wait ms */, 4 /* radioOffCfun */,  150 /* resetHoldMilliseconds */,
+        20 /* Cmd wait ms */, 3000 /* Resp max wait ms */, 4 /* radioOffCfun */,  150 /* resetHoldMilliseconds */,
         3 /* Simultaneous RATs */,
         ((1ULL << (int32_t) U_CELL_NET_RAT_GSM_GPRS_EGPRS) |
          (1ULL << (int32_t) U_CELL_NET_RAT_LTE)            |
@@ -351,13 +389,17 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SOCK_SET_LOCAL_PORT)                 |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FOTA)                                |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX_CHANNEL_CLOSE)                  |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SNR_REPORTED)                        |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                               |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                               |
-         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP) /* features */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_PPP) /* features */
         ),
         3, /* Default CMUX channel for GNSS */
-        15 /* AT+CFUN reboot command */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     },
     {
         U_CELL_MODULE_TYPE_LENA_R8, 2000 /* Pwr On pull ms */, 3100 /* Pwr off pull ms */,
@@ -380,15 +422,85 @@ const uCellPrivateModule_t gUCellPrivateModuleList[] = {
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTTSN)                              |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SOCK_SET_LOCAL_PORT)                 |
          (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                   |
-         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX) /* features */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         // LENA-R8 never seems to respond to individual CMUX channel close requests
          // LENA-R8 does, in theory, support HTTP, however the implementation is such that,
          // should the HTTP server respond with a non-2xx error code, the module does not
          // save the response to file (in fact it leaves any previous response file there,
          // unchanged) and returns error rather than success.  This makes it impossible to
          // support proper HTTP operation.
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_PPP) /* features */
         ),
         -1, /* Default CMUX channel for GNSS */
-        16 /* AT+CFUN reboot command */
+        16, /* AT+CFUN reboot command */
+        U_CELL_PRIVATE_PPP_CONTEXT_ID_LENA_R8, /* PPP PDP context ID */
+        0x127 /* GNSS system types for an attached GNSS chip (GPS, SBAS, Galileo and QZSS) */
+    },
+    {
+        U_CELL_MODULE_TYPE_SARA_R52, 150 /* Pwr On pull ms */, 2000 /* Pwr off pull ms */,
+        6 /* Boot wait */, 10 /* Min awake */, 20 /* Pwr down wait */, 15 /* Reboot wait */, 10 /* AT timeout */,
+        20 /* Cmd wait ms */, 3000 /* Resp max wait ms */, 4 /* radioOffCfun */, 150 /* resetHoldMilliseconds */,
+        1 /* Simultaneous RATs */,
+        ((1ULL << (int32_t) U_CELL_NET_RAT_CATM1) |
+         (1ULL << (int32_t) U_CELL_NET_RAT_NB1)) /* RATs */,
+        ((1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MNO_PROFILE)                         |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CSCON)                               |
+         /* There is no root of trust inside SARA-R52 */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_DATA_COUNTERS)                       |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SECURITY_TLS_IANA_NUMBERING)         |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SECURITY_TLS_CIPHER_LIST)            |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SECURITY_TLS_SERVER_NAME_INDICATION) |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTT)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTT_BINARY_PUBLISH)                 |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTT_WILL)                           |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTT_KEEP_ALIVE)                     |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTT_SECURITY)                       |
+         /* Context mapping is not required on SARA-R52 */
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_AUTO_BAUDING)                        |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_AT_PROFILES)                         |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SECURITY_ZTP)                        |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FILE_SYSTEM_TAG)                     |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_DTR_POWER_SAVING)                    |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_DEEP_SLEEP_URC)                      |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_3GPP_POWER_SAVING)                   |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_3GPP_POWER_SAVING_PAGING_WINDOW_SET) |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_EDRX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTTSN)                              |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MQTTSN_SECURITY)                     |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CTS_CONTROL)                         |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SOCK_SET_LOCAL_PORT)                 |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_FOTA)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UART_POWER_SAVING)                   |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_CMUX)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_SNR_REPORTED)                        |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_AUTHENTICATION_MODE_AUTOMATIC)       |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_LWM2M)                               |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_UCGED)                               |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_HTTP)                                |
+         (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_PPP) /* features */
+        ),
+        4, /* Default CMUX channel for GNSS */
+        16, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        0x127 /* GNSS system types for an attached GNSS chip (GPS, SBAS, Galileo and QZSS) */
+    },
+    // Add new module types here, before the U_CELL_MODULE_TYPE_ANY entry (since
+    // the uCellModuleType_t value is used as an index into this array).
+    {
+        // The module attributes set here are such that they help in identifying
+        // the actual module type.
+        U_CELL_MODULE_TYPE_ANY, -1, /* Pwr On pull ms, negative is set to enable the retry behaviour*/
+        3100 /* Pwr off pull ms */,
+        5 /* Boot wait */, 30 /* Min awake */, 35 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
+        100 /* Cmd wait ms */, 3000 /* Resp max wait ms */, 4 /* radioOffCfun */, 16500 /* resetHoldMilliseconds */,
+        1 /* Simultaneous RATs */,
+        (1ULL << (int32_t) U_CELL_NET_RAT_CATM1) /* RATs */,
+        (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_MNO_PROFILE) |
+        (1ULL << (int32_t) U_CELL_PRIVATE_FEATURE_DTR_POWER_SAVING) /* features */,
+        3, /* Default CMUX channel for GNSS */
+        15, /* AT+CFUN reboot command */
+        -1, /* PPP PDP context ID */
+        U_CELL_LOC_GNSS_SYSTEM_TYPES /* GNSS system types for an attached GNSS chip */
     }
 };
 
@@ -578,7 +690,6 @@ static void fileListClear(uCellPrivateFileListContainer_t **ppFileContainer)
         *ppFileContainer = pTmp;
     }
 }
-
 
 // [Re]attach a PDP context to an internal module profile with an
 // option on whether the AT client is locked/released or not.
@@ -787,15 +898,15 @@ int32_t  uCellPrivateCFunOne(uCellPrivateInstance_t *pInstance)
     // Set powered-up mode if it wasn't already
     if (errorCodeOrMode != 1) {
         // Wait for flip time to expire
-        while (uPortGetTickTimeMs() - pInstance->lastCfunFlipTimeMs <
-               (U_CELL_PRIVATE_AT_CFUN_FLIP_DELAY_SECONDS * 1000)) {
+        while (!uTimeoutExpiredSeconds(pInstance->lastCfunFlipTime,
+                                       U_CELL_PRIVATE_AT_CFUN_FLIP_DELAY_SECONDS)) {
             uPortTaskBlock(1000);
         }
         uAtClientLock(atHandle);
         uAtClientCommandStart(atHandle, "AT+CFUN=1");
         uAtClientCommandStopReadResponse(atHandle);
         if (uAtClientUnlock(atHandle) == 0) {
-            pInstance->lastCfunFlipTimeMs = uPortGetTickTimeMs();
+            pInstance->lastCfunFlipTime = uTimeoutStart();
             // And don't do anything for a second,
             // as the module might not be quite ready yet
             uPortTaskBlock(1000);
@@ -812,8 +923,8 @@ void uCellPrivateCFunMode(uCellPrivateInstance_t *pInstance,
     uAtClientHandle_t atHandle = pInstance->atHandle;
 
     // Wait for flip time to expire
-    while (uPortGetTickTimeMs() - pInstance->lastCfunFlipTimeMs <
-           (U_CELL_PRIVATE_AT_CFUN_FLIP_DELAY_SECONDS * 1000)) {
+    while (!uTimeoutExpiredSeconds(pInstance->lastCfunFlipTime,
+                                   U_CELL_PRIVATE_AT_CFUN_FLIP_DELAY_SECONDS)) {
         uPortTaskBlock(1000);
     }
     uAtClientLock(atHandle);
@@ -828,7 +939,7 @@ void uCellPrivateCFunMode(uCellPrivateInstance_t *pInstance,
     uAtClientWriteInt(atHandle, mode);
     uAtClientCommandStopReadResponse(atHandle);
     if (uAtClientUnlock(atHandle) == 0) {
-        pInstance->lastCfunFlipTimeMs = uPortGetTickTimeMs();
+        pInstance->lastCfunFlipTime = uTimeoutStart();
     }
 }
 
@@ -1280,7 +1391,7 @@ int32_t uCellPrivateFileListFirst(const uCellPrivateInstance_t *pInstance,
     int32_t errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
     uAtClientHandle_t atHandle;
     char *pFileNameTmp;
-    uCellPrivateFileListContainer_t *pFileContainer;
+    uCellPrivateFileListContainer_t *pFileContainer = NULL;
     bool keepGoing = true;
     int32_t bytesRead = 0;
     size_t count = 0;
@@ -1421,12 +1532,12 @@ void uCellPrivateSetPinDtr(uCellPrivateInstance_t *pInstance, bool doNotPowerSav
         if (!doNotPowerSave) {
             targetState = !targetState;
         }
-        while (uPortGetTickTimeMs() - pInstance->lastDtrPinToggleTimeMs <
-               U_CELL_PWR_UART_POWER_SAVING_DTR_HYSTERESIS_MS) {
+        while (!uTimeoutExpiredMs(pInstance->lastDtrPinToggleTime,
+                                  U_CELL_PWR_UART_POWER_SAVING_DTR_HYSTERESIS_MS)) {
             uPortTaskBlock(U_CELL_PRIVATE_DTR_PIN_HYSTERESIS_INTERVAL_MS);
         }
         if (uPortGpioSet(pInstance->pinDtrPowerSaving, targetState) == 0) {
-            pInstance->lastDtrPinToggleTimeMs = uPortGetTickTimeMs();
+            pInstance->lastDtrPinToggleTime = uTimeoutStart();
             uPortTaskBlock(U_CELL_PWR_UART_POWER_SAVING_DTR_READY_MS);
         }
     }
@@ -1557,16 +1668,8 @@ bool uCellPrivateGnssInsideCell(const uCellPrivateInstance_t *pInstance)
         atHandle = pInstance->atHandle;
         // Simplest way to check is to send ATI and see if
         // it includes an "M8" or an "M10"
-        uAtClientLock(atHandle);
-        uAtClientCommandStart(atHandle, "ATI");
-        uAtClientCommandStop(atHandle);
-        uAtClientResponseStart(atHandle, NULL);
-        bytesRead = uAtClientReadBytes(atHandle, buffer,
-                                       sizeof(buffer) - 1, false);
-        uAtClientResponseStop(atHandle);
-        if ((uAtClientUnlock(atHandle) == 0) && (bytesRead > 0)) {
-            // Add a terminator
-            buffer[bytesRead] = 0;
+        bytesRead = uAtClientGetAti(atHandle, buffer, sizeof(buffer));
+        if (bytesRead > 0) {
             if (strstr(buffer, "M8") != NULL) {
                 isInside = true;
             } else if (strstr(buffer, "M10") != NULL) {
@@ -1623,6 +1726,59 @@ void uCellPrivateAbortAtCommand(const uCellPrivateInstance_t *pInstance)
         success = (deviceError.type != U_AT_CLIENT_DEVICE_ERROR_TYPE_NO_ERROR);
         uAtClientUnlock(atHandle);
     }
+}
+
+// Get an ID string from the cellular module.
+int32_t uCellPrivateGetIdStr(uAtClientHandle_t  atHandle,
+                             const char *pCmd, char *pBuffer,
+                             size_t bufferSize)
+{
+    int32_t errorCodeOrSize;
+    int32_t bytesRead;
+    char delimiter;
+
+    uAtClientLock(atHandle);
+    uAtClientCommandStart(atHandle, "ATE0");
+    uAtClientCommandStopReadResponse(atHandle);
+    uAtClientCommandStart(atHandle, pCmd);
+    uAtClientCommandStop(atHandle);
+    // Don't want characters in the string being interpreted
+    // as delimiters
+    delimiter = uAtClientDelimiterGet(atHandle);
+    uAtClientDelimiterSet(atHandle, '\x00');
+    uAtClientResponseStart(atHandle, NULL);
+    bytesRead = uAtClientReadString(atHandle, pBuffer,
+                                    bufferSize, false);
+    uAtClientResponseStop(atHandle);
+    // Restore the delimiter
+    uAtClientDelimiterSet(atHandle, delimiter);
+    errorCodeOrSize = uAtClientUnlock(atHandle);
+    if ((bytesRead >= 0) && (errorCodeOrSize == 0)) {
+        uPortLog("U_CELL_INFO: ID string, length %d character(s),"
+                 " returned by %s is \"%s\".\n",
+                 bytesRead, pCmd, pBuffer);
+        errorCodeOrSize = bytesRead;
+    } else {
+        errorCodeOrSize = (int32_t) U_CELL_ERROR_AT;
+        uPortLog("U_CELL_INFO: unable to read ID string using"
+                 " %s.\n", pCmd);
+    }
+
+    return errorCodeOrSize;
+}
+
+// Updates the module related settings for the given instance.
+void uCellPrivateModuleSpecificSetting(uCellPrivateInstance_t *pInstance)
+{
+    if (U_CELL_PRIVATE_HAS(pInstance->pModule,
+                           U_CELL_PRIVATE_FEATURE_AUTHENTICATION_MODE_AUTOMATIC)) {
+        // Set automatic authentication mode where supported
+        pInstance->authenticationMode = U_CELL_NET_AUTHENTICATION_MODE_AUTOMATIC;
+    }
+    uAtClientTimeoutSet(pInstance->atHandle,
+                        pInstance->pModule->atTimeoutSeconds * 1000);
+    uAtClientDelaySet(pInstance->atHandle,
+                      pInstance->pModule->commandDelayDefaultMs);
 }
 
 // End of file

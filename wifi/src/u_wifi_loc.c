@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,8 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_debug.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -120,13 +122,13 @@ typedef struct {
 
 static int32_t gULocationTypeToUConnectType[] = {
     -1, // U_LOCATION_TYPE_NONE
-        -1, // U_LOCATION_TYPE_GNSS
-        0, // U_LOCATION_TYPE_CLOUD_CELL_LOCATE
-        1, // U_LOCATION_TYPE_CLOUD_GOOGLE
-        2, // U_LOCATION_TYPE_CLOUD_SKYHOOK
-        3, // U_LOCATION_TYPE_CLOUD_HERE
-        -1 // U_LOCATION_TYPE_CLOUD_CLOUD_LOCATE
-    };
+    -1, // U_LOCATION_TYPE_GNSS
+    0, // U_LOCATION_TYPE_CLOUD_CELL_LOCATE
+    1, // U_LOCATION_TYPE_CLOUD_GOOGLE
+    2, // U_LOCATION_TYPE_CLOUD_SKYHOOK
+    3, // U_LOCATION_TYPE_CLOUD_HERE
+    -1 // U_LOCATION_TYPE_CLOUD_CLOUD_LOCATE
+};
 
 static uWifiLocGeofenceDynamicStatus_t gFenceDynamicsStatus[U_WIFI_LOC_GEOFENCE_NUM_CACHED] = {0};
 
@@ -611,7 +613,7 @@ int32_t uWifiLocGet(uDeviceHandle_t wifiHandle,
     uShortRangePrivateInstance_t *pInstance;
     volatile uWifiLocContext_t *pContext;
     uAtClientHandle_t atHandle;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     uLocation_t location;
 
     if (gUShortRangePrivateMutex != NULL) {
@@ -626,51 +628,56 @@ int32_t uWifiLocGet(uDeviceHandle_t wifiHandle,
         if ((pInstance != NULL) && (pApiKey != NULL) && (rssiDbmFilter <= 0) &&
             (type >= 0) &&
             (type < sizeof(gULocationTypeToUConnectType) / sizeof(gULocationTypeToUConnectType[0]))) {
-            // Make sure we have a mutex (needed to protect the context
-            // for async operations but we use it here as a busy-check also)
-            errorCode = ensureMutex(pInstance);
-            if (errorCode == 0) {
-                // Can only fiddle with memory if we have the location mutex
-                errorCode = (int32_t) U_ERROR_COMMON_BUSY;
-                if (uPortMutexTryLock(pInstance->locMutex, 0) == 0) {
-                    errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
-                    pContext = pBeginLocationAlloc(pInstance, type, pApiKey,
-                                                   accessPointsFilter, rssiDbmFilter,
-                                                   &location);
-                    if (pContext != NULL) {
-                        pInstance->pLocContext = (volatile void *) pContext;
-                        // UNLOCK the location mutex to let the URC handler run
-                        uPortMutexUnlock(pInstance->locMutex);
-                        // Hook in the URC handler and wait
-                        atHandle = pInstance->atHandle;
-                        errorCode = uAtClientSetUrcHandler(atHandle, "+UUDHTTP:",
-                                                           uWifiPrivateUudhttpUrc,
-                                                           pInstance);
-                        if (errorCode == 0) {
-                            startTimeMs = uPortGetTickTimeMs();
-                            while ((pContext->errorCode == (int32_t) U_ERROR_COMMON_TIMEOUT) &&
-                                   (((pKeepGoingCallback == NULL) &&
-                                     ((uPortGetTickTimeMs() - startTimeMs) < U_WIFI_LOC_ANSWER_TIMEOUT_SECONDS * 1000)) ||
-                                    ((pKeepGoingCallback != NULL) && pKeepGoingCallback(wifiHandle)))) {
-                                uPortTaskBlock(250);
-                            }
-                            if (pLocation != NULL) {
-                                *pLocation = location;
-                            }
-                            errorCode = pContext->errorCode;
+            errorCode = (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
+            if (U_SHORT_RANGE_PRIVATE_HAS(pInstance->pModule,
+                                          U_SHORT_RANGE_PRIVATE_FEATURE_LOCATION_WIFI)) {
+                // Make sure we have a mutex (needed to protect the context
+                // for async operations but we use it here as a busy-check also)
+                errorCode = ensureMutex(pInstance);
+                if (errorCode == 0) {
+                    // Can only fiddle with memory if we have the location mutex
+                    errorCode = (int32_t) U_ERROR_COMMON_BUSY;
+                    if (uPortMutexTryLock(pInstance->locMutex, 0) == 0) {
+                        errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
+                        pContext = pBeginLocationAlloc(pInstance, type, pApiKey,
+                                                       accessPointsFilter, rssiDbmFilter,
+                                                       &location);
+                        if (pContext != NULL) {
+                            pInstance->pLocContext = (volatile void *) pContext;
+                            // UNLOCK the location mutex to let the URC handler run
+                            uPortMutexUnlock(pInstance->locMutex);
+                            // Hook in the URC handler and wait
+                            atHandle = pInstance->atHandle;
+                            errorCode = uAtClientSetUrcHandler(atHandle, "+UUDHTTP:",
+                                                               uWifiPrivateUudhttpUrc,
+                                                               pInstance);
                             if (errorCode == 0) {
-                                // Check out any geofences
-                                testGeofence(wifiHandle,
-                                             (uGeofenceContext_t *) pInstance->pFenceContext,
-                                             &location);
+                                timeoutStart = uTimeoutStart();
+                                while ((pContext->errorCode == (int32_t) U_ERROR_COMMON_TIMEOUT) &&
+                                       (((pKeepGoingCallback == NULL) &&
+                                         !uTimeoutExpiredSeconds(timeoutStart,
+                                                                 U_WIFI_LOC_ANSWER_TIMEOUT_SECONDS)) ||
+                                        ((pKeepGoingCallback != NULL) && pKeepGoingCallback(wifiHandle)))) {
+                                    uPortTaskBlock(250);
+                                }
+                                if (pLocation != NULL) {
+                                    *pLocation = location;
+                                }
+                                errorCode = pContext->errorCode;
+                                if (errorCode == 0) {
+                                    // Check out any geofences
+                                    testGeofence(wifiHandle,
+                                                 (uGeofenceContext_t *) pInstance->pFenceContext,
+                                                 &location);
+                                }
                             }
+                            pInstance->pLocContext = NULL;
+                            // Free memory
+                            uPortFree((void *) pContext);
+                        } else {
+                            // UNLOCK the location mutex on error
+                            uPortMutexUnlock(pInstance->locMutex);
                         }
-                        pInstance->pLocContext = NULL;
-                        // Free memory
-                        uPortFree((void *) pContext);
-                    } else {
-                        // UNLOCK the location mutex on error
-                        uPortMutexUnlock(pInstance->locMutex);
                     }
                 }
             }
@@ -708,40 +715,44 @@ int32_t uWifiLocGetStart(uDeviceHandle_t wifiHandle,
             (pApiKey != NULL) && (rssiDbmFilter <= 0) &&
             (type >= 0) &&
             (type < sizeof(gULocationTypeToUConnectType) / sizeof(gULocationTypeToUConnectType[0]))) {
-            // Make sure we have a mutex
-            errorCode = ensureMutex(pInstance);
-            if (errorCode == 0) {
-                // Can only fiddle with memory if we have the location mutex
-                errorCode = (int32_t) U_ERROR_COMMON_BUSY;
-                if (uPortMutexTryLock(pInstance->locMutex, 0) == 0) {
-                    errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
-                    pLocation = (uLocation_t *) pUPortMalloc(sizeof(uLocation_t));
-                    if (pLocation != NULL) {
-                        pContext = pBeginLocationAlloc(pInstance, type, pApiKey,
-                                                       accessPointsFilter, rssiDbmFilter,
-                                                       pLocation);
-                        if (pContext != NULL) {
-                            pContext->pCallback = pCallback;
-                            pInstance->pLocContext = (volatile void *) pContext;
-                            // Hook in the URC handler and return
-                            atHandle = pInstance->atHandle;
-                            errorCode = uAtClientSetUrcHandler(atHandle, "+UUDHTTP:",
-                                                               uWifiPrivateUudhttpUrc,
-                                                               pInstance);
-                            if (errorCode != 0) {
+            errorCode = (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
+            if (U_SHORT_RANGE_PRIVATE_HAS(pInstance->pModule,
+                                          U_SHORT_RANGE_PRIVATE_FEATURE_LOCATION_WIFI)) {
+                // Make sure we have a mutex
+                errorCode = ensureMutex(pInstance);
+                if (errorCode == 0) {
+                    // Can only fiddle with memory if we have the location mutex
+                    errorCode = (int32_t) U_ERROR_COMMON_BUSY;
+                    if (uPortMutexTryLock(pInstance->locMutex, 0) == 0) {
+                        errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
+                        pLocation = (uLocation_t *) pUPortMalloc(sizeof(uLocation_t));
+                        if (pLocation != NULL) {
+                            pContext = pBeginLocationAlloc(pInstance, type, pApiKey,
+                                                           accessPointsFilter, rssiDbmFilter,
+                                                           pLocation);
+                            if (pContext != NULL) {
+                                pContext->pCallback = pCallback;
+                                pInstance->pLocContext = (volatile void *) pContext;
+                                // Hook in the URC handler and return
+                                atHandle = pInstance->atHandle;
+                                errorCode = uAtClientSetUrcHandler(atHandle, "+UUDHTTP:",
+                                                                   uWifiPrivateUudhttpUrc,
+                                                                   pInstance);
+                                if (errorCode != 0) {
+                                    // Free memory on error
+                                    pInstance->pLocContext = NULL;
+                                    uPortFree((void *) pContext);
+                                    uPortFree(pLocation);
+                                }
+                            } else {
                                 // Free memory on error
-                                pInstance->pLocContext = NULL;
-                                uPortFree((void *) pContext);
                                 uPortFree(pLocation);
                             }
-                        } else {
-                            // Free memory on error
-                            uPortFree(pLocation);
                         }
-                    }
 
-                    // UNLOCK the location  mutex; it will be locked again by the URC handler
-                    uPortMutexUnlock(pInstance->locMutex);
+                        // UNLOCK the location  mutex; it will be locked again by the URC handler
+                        uPortMutexUnlock(pInstance->locMutex);
+                    }
                 }
             }
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ extern "C" {
 
 /** The maximum size of a datagram and the maximum size of a
  * single TCP segment sent to the cellular module (defined by the
- * cellular module AT interface).  Note the if hex mode is
+ * cellular module AT interface).  Note that if hex mode is
   set (using uCellSockHexModeOn()) then the number is halved.
  */
 #define U_CELL_SOCK_MAX_SEGMENT_SIZE_BYTES 1024
@@ -193,7 +193,7 @@ int32_t uCellSockClose(uDeviceHandle_t cellHandle,
 /** Clean-up.  This function should be called when
  * there is no socket activity, either locally or from
  * the remote host, in order to free memory occupied
- * by closed sockets.
+ * by sockets that have been closed.
  *
  * @param cellHandle  the handle of the cellular instance.
  */

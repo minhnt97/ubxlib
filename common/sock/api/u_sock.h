@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,14 @@ extern "C" {
  * define #U_SOCK_DESCRIPTOR_SET_SIZE.  A limitation may also be
  * applied by the underlying implementation.
  */
-# define U_SOCK_MAX_NUM_SOCKETS 7
+
+// *** UCX WORKAROUND FIX ***
+// Lower value for ucx required
+# ifdef U_UCONNECT_GEN2
+#  define U_SOCK_MAX_NUM_SOCKETS 3
+# else
+#  define U_SOCK_MAX_NUM_SOCKETS 7
+# endif
 #endif
 
 #ifndef U_SOCK_DEFAULT_RECEIVE_TIMEOUT_MS
@@ -368,6 +375,21 @@ typedef struct {
  * assigned by the IP stack unless uSockSetNextLocalPort()
  * has been called.
  *
+ * Note: the descriptor (an integer) returned by this function
+ * is not the one the module returns, it is a local descriptor
+ * which this API will _map_ to the one the module returns.
+ * In other words if, in an AT log, you see:
+ *
+ * ```
+ * AT+USOCR=17
+ * +USOCR: 0
+ * OK
+ * ```
+ *
+ * ...the descriptor returned here may not be 0, it will be
+ * the next value of an incrementing integer maintained by
+ * this code.
+ *
  * @param devHandle      the handle of the underlying network
  *                       layer to use, usually established by
  *                       a call to uDeviceOpen().
@@ -436,6 +458,21 @@ void uSockCleanUp();
  * whatever their state, are closed locally.
  */
 void uSockDeinit();
+
+/** This function has a VERY SPECIFIC purpose, you do not normally
+ * need to use it.  It causes the ubxlib code to forget about
+ * any open sockets; the associated module(s) are NOT contacted,
+ * it is simply as though no sockets have yet been opened.
+ *
+ * This is useful if you are running sockets with a module which
+ * can, without notice, lose the lot of them; for instance if
+ * the module is a cellular module that has entered 3GPP power
+ * saving, when it will lose all data in RAM, including sockets.
+ *
+ * This function effectively clears the sockets on this MCU so that
+ * the state of this code matches the module.
+ */
+void uSockForgetAll();
 
 /* ----------------------------------------------------------------
  * FUNCTIONS: CONFIGURE
@@ -731,7 +768,6 @@ int32_t uSockSelect(int32_t maxDescriptor,
                     uSockDescriptorSet_t *pWriteDescriptorSet,
                     uSockDescriptorSet_t *pExceptDescriptorSet,
                     int32_t timeMs);
-
 
 /** Get the number of bytes sent by the socket
  * @param descriptor    the descriptor of the socket to get the sent bytes

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,11 +76,12 @@
  */
 const uGnssTransportType_t gDeviceToGnssTransportType[] = {
     U_GNSS_TRANSPORT_NONE, // U_DEVICE_TRANSPORT_TYPE_NONE,
-    U_GNSS_TRANSPORT_UART, // U_DEVICE_TRANSPORT_TYPE_UART or U_DEVICE_TRANSPORT_TYPE_UART_1,
-    U_GNSS_TRANSPORT_I2C,  // U_DEVICE_TRANSPORT_TYPE_I2C,
-    U_GNSS_TRANSPORT_SPI,  // U_DEVICE_TRANSPORT_TYPE_SPI,
+    U_GNSS_TRANSPORT_UART, // U_DEVICE_TRANSPORT_TYPE_UART or U_DEVICE_TRANSPORT_TYPE_UART_1
+    U_GNSS_TRANSPORT_I2C,  // U_DEVICE_TRANSPORT_TYPE_I2C
+    U_GNSS_TRANSPORT_SPI,  // U_DEVICE_TRANSPORT_TYPE_SPI
     U_GNSS_TRANSPORT_VIRTUAL_SERIAL, // U_DEVICE_TRANSPORT_TYPE_VIRTUAL_SERIAL
-    U_GNSS_TRANSPORT_UART_2 // U_DEVICE_TRANSPORT_TYPE_UART_2,
+    U_GNSS_TRANSPORT_UART_2, // U_DEVICE_TRANSPORT_TYPE_UART_2
+    U_GNSS_TRANSPORT_USB   // U_DEVICE_TRANSPORT_TYPE_UART_USB
 };
 
 /* ----------------------------------------------------------------
@@ -94,6 +95,8 @@ static void populateContext(uDeviceGnssInstance_t *pContext,
 {
     switch (deviceTransportType) {
         case U_DEVICE_TRANSPORT_TYPE_UART:
+        // fall-through
+        case U_DEVICE_TRANSPORT_TYPE_UART_USB:
         // fall-through
         case U_DEVICE_TRANSPORT_TYPE_UART_2:
             pContext->transportHandle.int32Handle = gnssTransportHandle.uart;
@@ -156,6 +159,7 @@ static int32_t addDevice(uGnssTransportHandle_t gnssTransportHandle,
 
     pContext = (uDeviceGnssInstance_t *) pUPortMalloc(sizeof(uDeviceGnssInstance_t));
     if (pContext != NULL) {
+        memset(pContext, 0, sizeof(*pContext));
         populateContext(pContext, gnssTransportHandle, deviceTransportType);
         // Add the GNSS instance, which actually creates pDeviceHandle
         errorCode = uGnssAdd((uGnssModuleType_t) pCfgGnss->moduleType,
@@ -233,28 +237,61 @@ int32_t uDevicePrivateGnssAdd(const uDeviceCfg_t *pDevCfg,
             switch (pDevCfg->transportType) {
                 case U_DEVICE_TRANSPORT_TYPE_UART:
                 // fall-through
+                case U_DEVICE_TRANSPORT_TYPE_UART_USB:
+                // fall-through
                 case U_DEVICE_TRANSPORT_TYPE_UART_2:
                     pCfgUart = &(pDevCfg->transportCfg.cfgUart);
                     if (pCfgUart->pPrefix != NULL) {
                         uPortUartPrefix(pCfgUart->pPrefix);
                     }
-                    // Open a UART with the recommended buffer length
-                    // and default baud rate.
-                    errorCode = uPortUartOpen(pCfgUart->uart,
-                                              pCfgUart->baudRate, NULL,
-                                              U_GNSS_UART_BUFFER_LENGTH_BYTES,
-                                              pCfgUart->pinTxd,
-                                              pCfgUart->pinRxd,
-                                              pCfgUart->pinCts,
-                                              pCfgUart->pinRts);
-                    if (errorCode >= 0) {
-                        gnssTransportHandle.uart = errorCode;
-                        errorCode = addDevice(gnssTransportHandle,
-                                              pDevCfg->transportType,
-                                              pCfgGnss, pDeviceHandle);
-                        if (errorCode < 0) {
-                            // Clean up on error
-                            uPortUartClose(gnssTransportHandle.uart);
+                    if (0 == pCfgUart->baudRate) {
+                        // Negotiate baud rate
+                        const unsigned baudRates[] = { 1200, 2400, 4800, 9600, 14400,
+                                                       19200, 38400, 57600, 115200,
+                                                       230400, 460800, 921600
+                                                     };
+
+                        for (int32_t i = ((sizeof(baudRates) / sizeof(baudRates[0])) - 1); i >= 0; --i) {
+                            errorCode = uPortUartOpen(pCfgUart->uart,
+                                                      baudRates[i], NULL,
+                                                      U_GNSS_UART_BUFFER_LENGTH_BYTES,
+                                                      pCfgUart->pinTxd,
+                                                      pCfgUart->pinRxd,
+                                                      pCfgUart->pinCts,
+                                                      pCfgUart->pinRts);
+                            if (errorCode >= 0) {
+                                gnssTransportHandle.uart = errorCode;
+                                errorCode = addDevice(gnssTransportHandle,
+                                                      pDevCfg->transportType,
+                                                      pCfgGnss, pDeviceHandle);
+                                if (errorCode < 0) {
+                                    // Clean up on error
+                                    uPortUartClose(gnssTransportHandle.uart);
+                                } else {
+                                    // Found acceptable baudrate
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        // Open a UART with the recommended buffer length
+                        // and default baud rate.
+                        errorCode = uPortUartOpen(pCfgUart->uart,
+                                                  pCfgUart->baudRate, NULL,
+                                                  U_GNSS_UART_BUFFER_LENGTH_BYTES,
+                                                  pCfgUart->pinTxd,
+                                                  pCfgUart->pinRxd,
+                                                  pCfgUart->pinCts,
+                                                  pCfgUart->pinRts);
+                        if (errorCode >= 0) {
+                            gnssTransportHandle.uart = errorCode;
+                            errorCode = addDevice(gnssTransportHandle,
+                                                  pDevCfg->transportType,
+                                                  pCfgGnss, pDeviceHandle);
+                            if (errorCode < 0) {
+                                // Clean up on error
+                                uPortUartClose(gnssTransportHandle.uart);
+                            }
                         }
                     }
                     break;
@@ -291,12 +328,21 @@ int32_t uDevicePrivateGnssAdd(const uDeviceCfg_t *pDevCfg,
                                              true);
                     if (errorCode >= 0) {
                         gnssTransportHandle.spi = errorCode;
-                        errorCode = uPortSpiControllerSetDevice(errorCode,
-                                                                &(pCfgSpi->device));
-                        if (errorCode == 0) {
-                            errorCode = addDevice(gnssTransportHandle,
-                                                  pDevCfg->transportType,
-                                                  pCfgGnss, pDeviceHandle);
+                        if (pCfgSpi->maxSegmentSize > 0) {
+                            if (uPortSpiSetMaxSegmentSize(gnssTransportHandle.spi,
+                                                          pCfgSpi->maxSegmentSize) < 0) {
+                                // Return a meaningful error code
+                                errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+                            }
+                        }
+                        if (errorCode >= 0) {
+                            errorCode = uPortSpiControllerSetDevice(gnssTransportHandle.spi,
+                                                                    &(pCfgSpi->device));
+                            if (errorCode == 0) {
+                                errorCode = addDevice(gnssTransportHandle,
+                                                      pDevCfg->transportType,
+                                                      pCfgGnss, pDeviceHandle);
+                            }
                         }
                         if (errorCode < 0) {
                             // Clean up on error
@@ -347,6 +393,8 @@ int32_t uDevicePrivateGnssRemove(uDeviceHandle_t devHandle,
             // Having removed the device, close the transport
             switch (deviceTransportType) {
                 case U_DEVICE_TRANSPORT_TYPE_UART:
+                // fall-through
+                case U_DEVICE_TRANSPORT_TYPE_UART_USB:
                 // fall-through
                 case U_DEVICE_TRANSPORT_TYPE_UART_2:
                     uPortUartClose(transportHandle.int32Handle);

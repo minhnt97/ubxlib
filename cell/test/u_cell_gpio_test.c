@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +53,8 @@
 #include "u_port_uart.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -152,8 +154,9 @@ U_PORT_TEST_FUNCTION("[cellGpio]", "cellGpioBasic")
 
     // For toggling the CTS pin we need to know that it is not
     // already in use for flow control and this command is also not
-    // supported on SARA-R4
+    // supported on SARA-R4 or LARA-R6
     if (!U_CELL_PRIVATE_MODULE_IS_SARA_R4(pInstance->pModule->moduleType) &&
+        (pInstance->pModule->moduleType != U_CELL_MODULE_TYPE_LARA_R6) &&
         !uCellInfoIsCtsFlowControlEnabled(cellHandle)) {
         U_TEST_PRINT_LINE("getting CTS...");
         x = uCellGpioGetCts(cellHandle);

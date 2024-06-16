@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@
 
 /** @file
  * @brief Porting layer and configuration items passed in at application
- * level when executing tests on the sara5ucpu platform.
+ * level when executing tests on the sara5ucpu platform; NONE of the
+ * parameters here are compiled into ubxlib itself.
  */
 
 /* ----------------------------------------------------------------

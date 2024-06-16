@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,6 +76,8 @@ typedef enum {
     U_ERROR_COMMON_IGNORED = U_ERROR_BASE - 21,
     U_ERROR_COMMON_TOO_BIG = U_ERROR_BASE - 22,
     U_ERROR_COMMON_NOT_COMPILED = U_ERROR_BASE - 23,
+    U_ERROR_COMMON_UNKNOWN_MODULE_TYPE = U_ERROR_BASE - 24,
+    U_ERROR_COMMON_CONFIGURATION = U_ERROR_BASE - 25,
     U_ERROR_COMMON_MIN = U_ERROR_BASE - 255,
     U_ERROR_CELL_MAX = U_ERROR_BASE - 256,
     U_ERROR_CELL_MIN = U_ERROR_BASE - 511,

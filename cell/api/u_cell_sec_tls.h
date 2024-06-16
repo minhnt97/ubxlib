@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -311,7 +311,8 @@ bool uCellSecTlsIsUsingDeviceCertificate(const uCellSecTlsContext_t *pContext,
  * u-blox module AT manual for further information.
  * Note that the SARA-U201 and SARA-R4xx modules support only a
  * single configurable cipher suite and adding a new one will
- * overwrite the previous.
+ * overwrite the previous; you may determine whether this is the
+ * case by calling uCellSecTlsCipherSuiteMoreThanOne().
  *
  * @param[in] pContext a pointer to the security context.
  * @param ianaNumber   the IANA number of the cipher suite to add.
@@ -381,6 +382,18 @@ int32_t uCellSecTlsCipherSuiteListNext(uCellSecTlsContext_t *pContext);
  * @param[in] pContext a pointer to the security context.
  */
 void uCellSecTlsCipherSuiteListLast(uCellSecTlsContext_t *pContext);
+
+/** Determine whether a cellular device supports more than one
+ * user-selected cipher suite.  Should this return false then
+ * uCellSecTlsCipherSuiteAdd() will simply replace the single
+ * supported cipher suite with the given one, rather than
+ * performing an "add to list" type of operation.
+ *
+ * @param cellHandle  the handle of the cellular instance.
+ * @return            true if more than one cipher suite
+ *                    is supported, else false.
+ */
+bool uCellSecTlsCipherSuiteMoreThanOne(uDeviceHandle_t cellHandle);
 
 /* ----------------------------------------------------------------
  * FUNCTIONS: MISC SETTINGS

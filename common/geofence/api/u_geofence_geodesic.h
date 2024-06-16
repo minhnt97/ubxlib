@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@
  * resulting in calculation errors up to 0.5% for large shapes.
  *
  * IMPORTANT: computationally, a true earth model is, of course,
- * the most expensive; probably 10 time more than the spherical
+ * the most expensive; probably 10 times more than the spherical
  * case, think 10 to 100 ms of calculation time per position
  * for a polygon > 1 km on an average MCU (e.g. ESP32) and about
  * 5 kbytes more task stack required in ANY TASK where the
@@ -102,7 +102,8 @@ extern "C" {
  * for a given distance, work out the WGS84 coordinates at the end.
  *
  * If the function is unable to calculate any of the parameters
- * requested it should populate them with NAN and return success.
+ * requested it should populate those variables with NAN and return
+ * success.
  *
  * YOU MUST PROVIDE an implementation of this function if you wish to
  * use large circles or large polygons (e.g. more than a kilometre in
@@ -141,7 +142,8 @@ int32_t uGeofenceWgs84GeodDirect(double latitudeDegrees,
  * in WGS84 coordinates.
  *
  * If the function is unable to calculate any of the parameters
- * requested it should populate them with NAN and return success.
+ * requested it should populate those variables with NAN and return
+ * success.
  *
  * YOU MUST PROVIDE an implementation of this function if you wish to
  * use large circles or large polygons (e.g. more than a kilometre in
@@ -216,7 +218,7 @@ int32_t uGeofenceWgs84LatitudeOfIntersection(double aLatitudeDegrees,
 /** Given two points on the surface of the earth, work out the shortest
  * distance from the shortest line between the two points to a third
  * point, in WGS84 coordinates.  The solution must take into account the
- * fact that the line is a segment, i.e. this not the distance to a
+ * fact that the line is a segment, i.e. this is not the distance to a
  * great circle, the line has finite length.
  *
  * If the function is unable to calculate the distance it

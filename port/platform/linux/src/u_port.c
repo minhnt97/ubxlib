@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@
 #ifdef U_CFG_OVERRIDE
 # include "u_cfg_override.h" // For a customer's configuration override
 #endif
+
+#include "limits.h"    // INT_MAX
 #include "stddef.h"    // NULL, size_t etc.
 #include "stdint.h"    // int32_t etc.
 #include "stdbool.h"
@@ -42,6 +44,7 @@
 #include "u_port_uart.h"
 #include "u_port_event_queue_private.h"
 #include "u_port_os_private.h"
+#include "u_port_ppp_private.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -92,12 +95,16 @@ int32_t uPortInit()
     if (errorCode == 0) {
         errorCode = uPortUartInit();
     }
+    if (errorCode == 0) {
+        errorCode = uPortPppPrivateInit();
+    }
     return errorCode;
 }
 
 // Deinitialise the porting layer.
 void uPortDeinit()
 {
+    uPortPppPrivateDeinit();
     uPortUartDeinit();
     uPortEventQueuePrivateDeinit();
     uPortOsPrivateDeinit();
@@ -108,9 +115,11 @@ int32_t uPortGetTickTimeMs()
 {
     int32_t ms = 0;
     struct timespec ts;
+
     if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0) {
-        ms = (ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
+        ms = (((int64_t) ts.tv_sec) * 1000) + (((int64_t) ts.tv_nsec) / 1000000);
     }
+
     return ms;
 }
 

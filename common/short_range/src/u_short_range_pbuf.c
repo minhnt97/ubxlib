@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,6 @@
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
-
 
 /* ----------------------------------------------------------------
  * STATIC PROTOTYPES
@@ -178,7 +177,6 @@ void uShortRangePbufListMerge(uShortRangePbufList_t *pOldList, uShortRangePbufLi
     }
 }
 
-
 size_t uShortRangePbufListConsumeData(uShortRangePbufList_t *pBufList, char *pData, size_t len)
 {
     size_t copiedLen = 0;
@@ -219,7 +217,6 @@ size_t uShortRangePbufListConsumeData(uShortRangePbufList_t *pBufList, char *pDa
 
     return copiedLen;
 }
-
 
 int32_t uShortRangePktListAppend(uShortRangePktList_t *pPktList,
                                  uShortRangePbufList_t *pPbufList)

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,7 +106,7 @@ typedef struct uPortPrivateTimer_t {
  * -------------------------------------------------------------- */
 
 // Counter to keep track of RTOS ticks: NOT static
-// so that the stm32f4xx_it.c can update it.
+// so that the u_exception_handler.c can update it.
 int32_t gTickTimerRtosCount;
 
 // Get the GPIOx address for a given GPIO port.

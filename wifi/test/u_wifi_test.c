@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -173,7 +173,6 @@ static void wifiNetworkStatusCallback(uDeviceHandle_t devHandle,
     gWifiStatusMask = statusMask;
 }
 
-
 static uWifiTestError_t runWifiTest(const char *pSsid, const char *pPassPhrase)
 {
     uWifiTestError_t testError = U_WIFI_TEST_ERROR_NONE;
@@ -341,7 +340,9 @@ U_PORT_TEST_FUNCTION("[wifi]", "wifiOpenUart")
                                                 &uart,
                                                 &gHandles) == 0);
     U_PORT_TEST_ASSERT(uShortRangeGetUartHandle(gHandles.devHandle) == gHandles.uartHandle);
+#ifndef U_UCONNECT_GEN2
     U_PORT_TEST_ASSERT(uShortRangeGetEdmStreamHandle(gHandles.devHandle) == gHandles.edmStreamHandle);
+#endif
     uShortRangeAtClientHandleGet(gHandles.devHandle, &atClient);
     U_PORT_TEST_ASSERT(gHandles.atClientHandle == atClient);
     U_PORT_TEST_ASSERT(uShortRangeAttention(gHandles.devHandle) == 0);

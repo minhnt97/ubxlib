@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,6 +62,8 @@
 #include "u_port_event_queue.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_network.h"
 #include "u_network_test_shared_cfg.h"
@@ -147,7 +149,7 @@
 
 /** Used for keepGoingCallback() timeout.
  */
-static int64_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /**  The test MQTT context.
  */
@@ -160,8 +162,9 @@ static char gSerialNumber[U_SECURITY_SERIAL_NUMBER_MAX_LENGTH_BYTES];
 
 /** Data to send over MQTT; all printable characters.
  */
-static const char gSendData[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                "0123456789\"!#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+static const char gSendData[] =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "0123456789\"!#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
 /** Flag to indicate that the disconnect callback
  * has been called.
@@ -182,7 +185,8 @@ static bool keepGoingCallback(void)
 {
     bool keepGoing = true;
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -234,13 +238,16 @@ static uNetworkTestList_t *pStdPreamble(bool mqttSn)
 static void messageIndicationCallback(int32_t numUnread, void *pParam)
 {
     int32_t *pNumUnread = (int32_t *) pParam;
+    int32_t x;
 
     U_TEST_PRINT_LINE_MQTT("messageIndicationCallback() called, %d message(s) unread.", numUnread);
 
     if (gpMqttContextA != NULL) {
         // To prove that it is possible to do it, rather than for any
         // practical reason, call back into the MQTT API here
-        U_PORT_TEST_ASSERT(uMqttClientGetUnread(gpMqttContextA) >= numUnread);
+        x = uMqttClientGetUnread(gpMqttContextA);
+        U_PORT_TEST_ASSERT(x >= numUnread);
+        U_TEST_PRINT_LINE_MQTT("messageIndicationCallback(), uMqttClientGetUnread() returned %d.", x);
     }
 
     *pNumUnread = numUnread;
@@ -275,7 +282,6 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
     int32_t y;
     int32_t z;
     size_t s;
-    int32_t startTimeMs;
     char *pTopicOut;
     char *pTopicIn;
     char *pMessageOut;
@@ -332,7 +338,6 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
             // Make a unique topic name to stop different boards colliding
             snprintf(pTopicOut, U_MQTT_CLIENT_TEST_READ_TOPIC_MAX_LENGTH_BYTES,
                      "ubx_test/%s", gSerialNumber);
-            gNumUnread = 0;
             bool noTls = (run == 0) || (pTmp->networkType == U_NETWORK_TYPE_WIFI);
             // Open an MQTT client
             if (noTls) {
@@ -375,14 +380,13 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
 
                 // Connect it
                 U_TEST_PRINT_LINE_MQTT("connecting to \"%s\"...", connection.pBrokerNameStr);
-                startTimeMs = uPortGetTickTimeMs();
-                gStopTimeMs = startTimeMs +
-                              (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                gTimeoutStop.timeoutStart = uTimeoutStart();
+                gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                 y = uMqttClientConnect(gpMqttContextA, &connection);
                 z = uMqttClientOpenResetLastError();
                 if (y == 0) {
-                    U_TEST_PRINT_LINE_MQTT("connect successful after %d ms.",
-                                           (int32_t) (uPortGetTickTimeMs() - startTimeMs));
+                    U_TEST_PRINT_LINE_MQTT("connect successful after %u ms.",
+                                           uTimeoutElapsedMs(gTimeoutStop.timeoutStart));
                     U_PORT_TEST_ASSERT(z == 0);
                     // Note: can't check the return value here as it is
                     // utterly module specific, only really checking that it
@@ -397,17 +401,16 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
                                                                      &gNumUnread) == 0);
 
                     U_TEST_PRINT_LINE_MQTT("subscribing to topic \"%s\"...", pTopicOut);
-                    startTimeMs = uPortGetTickTimeMs();
-                    gStopTimeMs = startTimeMs +
-                                  (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                     y = uMqttClientSubscribe(gpMqttContextA, pTopicOut, U_MQTT_QOS_EXACTLY_ONCE);
                     if (y >= 0) {
-                        U_TEST_PRINT_LINE_MQTT("subscribe successful after %d ms, QoS %d.",
-                                               (int32_t) (uPortGetTickTimeMs() - startTimeMs), y);
+                        U_TEST_PRINT_LINE_MQTT("subscribe successful after %u ms, QoS %d.",
+                                               uTimeoutElapsedMs(gTimeoutStop.timeoutStart), y);
                     } else {
-                        U_TEST_PRINT_LINE_MQTT("subscribe returned error %d after %d ms,"
+                        U_TEST_PRINT_LINE_MQTT("subscribe returned error %d after %u ms,"
                                                " module error %d.", y,
-                                               (int32_t) (uPortGetTickTimeMs() - startTimeMs),
+                                               uTimeoutElapsedMs(gTimeoutStop.timeoutStart),
                                                uMqttClientGetLastErrorCode(gpMqttContextA));
                         //lint -e(506, 774) Suppress constant value Boolean
                         U_PORT_TEST_ASSERT(false);
@@ -429,12 +432,12 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
                     }
 
                     U_PORT_TEST_ASSERT(uMqttClientGetUnread(gpMqttContextA) == 0);
+                    gNumUnread = 0;
 
                     U_TEST_PRINT_LINE_MQTT("publishing %d byte(s) to topic \"%s\"...",
                                            U_MQTT_CLIENT_TEST_PUBLISH_MAX_LENGTH_BYTES, pTopicOut);
-                    startTimeMs = uPortGetTickTimeMs();
-                    gStopTimeMs = startTimeMs +
-                                  (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                     // Fill in the outgoing message buffer with all possible things
                     s = 0;
                     y = U_MQTT_CLIENT_TEST_PUBLISH_MAX_LENGTH_BYTES;
@@ -451,32 +454,33 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
                                            U_MQTT_CLIENT_TEST_PUBLISH_MAX_LENGTH_BYTES,
                                            U_MQTT_QOS_EXACTLY_ONCE, false);
                     if (y == 0) {
-                        U_TEST_PRINT_LINE_MQTT("publish successful after %d ms.",
-                                               (int32_t) (uPortGetTickTimeMs() - startTimeMs));
+                        U_TEST_PRINT_LINE_MQTT("publish successful after %u ms.",
+                                               uTimeoutElapsedMs(gTimeoutStop.timeoutStart));
                         // We've just sent a message
                         U_PORT_TEST_ASSERT(uMqttClientGetTotalMessagesSent(gpMqttContextA) > 0);
                     } else {
-                        U_TEST_PRINT_LINE_MQTT("publish returned error %d after %d ms, module"
+                        U_TEST_PRINT_LINE_MQTT("publish returned error %d after %u ms, module"
                                                " error %d.", y,
-                                               (int32_t) (uPortGetTickTimeMs() - startTimeMs),
+                                               uTimeoutElapsedMs(gTimeoutStop.timeoutStart),
                                                uMqttClientGetLastErrorCode(gpMqttContextA));
                         //lint -e(506, 774) Suppress constant value Boolean
                         U_PORT_TEST_ASSERT(false);
                     }
 
                     U_TEST_PRINT_LINE_MQTT("waiting for an unread message indication...");
-                    startTimeMs = uPortGetTickTimeMs();
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                     while ((gNumUnread == 0) &&
-                           (uPortGetTickTimeMs() < startTimeMs +
-                            (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000))) {
+                           !uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                                              gTimeoutStop.durationMs)) {
                         uPortTaskBlock(1000);
                     }
 
                     if (gNumUnread > 0) {
                         U_TEST_PRINT_LINE_MQTT("%d message(s) unread.", gNumUnread);
                     } else {
-                        U_TEST_PRINT_LINE_MQTT("no messages unread after %d ms.",
-                                               (int32_t) (uPortGetTickTimeMs() - startTimeMs));
+                        U_TEST_PRINT_LINE_MQTT("no messages unread after %u ms.",
+                                               uTimeoutElapsedMs(gTimeoutStop.timeoutStart));
                         //lint -e(506, 774) Suppress constant value Boolean
                         U_PORT_TEST_ASSERT(false);
                     }
@@ -508,6 +512,7 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
                     U_PORT_TEST_ASSERT(memcmp(pMessageIn, pMessageOut, s) == 0);
 
                     U_PORT_TEST_ASSERT(uMqttClientGetUnread(gpMqttContextA) == 0);
+                    gNumUnread = 0;
 
                     // Read again - should return U_ERROR_COMMON_EMPTY
                     // Note that in the cellular case, for some modules (e.g. SARA-R4),
@@ -541,8 +546,8 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
 
                     // Cancel the subscribe
                     U_TEST_PRINT_LINE_MQTT("unsubscribing from topic \"%s\"...", pTopicOut);
-                    gStopTimeMs = uPortGetTickTimeMs() +
-                                  (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                     U_PORT_TEST_ASSERT(uMqttClientUnsubscribe(gpMqttContextA, pTopicOut) == 0);
 
                     // Remove the callback
@@ -562,9 +567,9 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClient")
                     }
                 } else {
                     if (noTls) {
-                        U_TEST_PRINT_LINE_MQTT("connection failed after %d ms,"
+                        U_TEST_PRINT_LINE_MQTT("connection failed after %u ms,"
                                                " with error %d, module error %d.",
-                                               (int32_t) (uPortGetTickTimeMs() - startTimeMs), z,
+                                               uTimeoutElapsedMs(gTimeoutStop.timeoutStart), z,
                                                uMqttClientGetLastErrorCode(gpMqttContextA));
                         //lint -e(506, 774) Suppress constant value Boolean
                         U_PORT_TEST_ASSERT(false);
@@ -626,7 +631,6 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
     int32_t y;
     int32_t z;
     size_t s;
-    int32_t startTimeMs;
     char *pTopicNameOutMqtt;
     uMqttSnTopicName_t topicNameOut;
     uMqttSnTopicName_t topicNameIn;
@@ -686,7 +690,6 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
         // Make a unique topic name to stop different boards colliding
         snprintf(pTopicNameOutMqtt, U_MQTT_CLIENT_TEST_READ_TOPIC_MAX_LENGTH_BYTES,
                  "ubx_test/%s", gSerialNumber);
-        gNumUnread = 0;
         // Open an MQTT-SN client
         U_TEST_PRINT_LINE_MQTTSN("opening MQTT-SN client...");
         gpMqttContextA = pUMqttClientOpen(devHandle, NULL);
@@ -713,14 +716,13 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
 
             // Connect it
             U_TEST_PRINT_LINE_MQTTSN("connecting to \"%s\"...", connection.pBrokerNameStr);
-            startTimeMs = uPortGetTickTimeMs();
-            gStopTimeMs = startTimeMs +
-                          (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+            gTimeoutStop.timeoutStart = uTimeoutStart();
+            gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
             y = uMqttClientConnect(gpMqttContextA, &connection);
             z = uMqttClientOpenResetLastError();
             if (y == 0) {
-                U_TEST_PRINT_LINE_MQTTSN("connect successful after %d ms.",
-                                         (int32_t) (uPortGetTickTimeMs() - startTimeMs));
+                U_TEST_PRINT_LINE_MQTTSN("connect successful after %u ms.",
+                                         uTimeoutElapsedMs(gTimeoutStop.timeoutStart));
                 U_PORT_TEST_ASSERT(z == 0);
                 // Note: can't check the return value here as it is
                 // utterly module specific, only really checking that it
@@ -735,24 +737,23 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
                                                                  &gNumUnread) == 0);
 
                 U_TEST_PRINT_LINE_MQTTSN("subscribing to MQTT topic \"%s\"...", pTopicNameOutMqtt);
-                startTimeMs = uPortGetTickTimeMs();
-                gStopTimeMs = startTimeMs +
-                              (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                gTimeoutStop.timeoutStart = uTimeoutStart();
+                gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                 memset(&topicNameOut, 0xFF, sizeof(topicNameOut));
                 y = uMqttClientSnSubscribeNormalTopic(gpMqttContextA, pTopicNameOutMqtt,
                                                       U_MQTT_QOS_EXACTLY_ONCE, &topicNameOut);
                 if (y >= 0) {
-                    U_TEST_PRINT_LINE_MQTTSN("subscribe successful after %d ms, topic ID \"%d\","
-                                             " QoS %d.", (int32_t) (uPortGetTickTimeMs() - startTimeMs),
+                    U_TEST_PRINT_LINE_MQTTSN("subscribe successful after %u ms, topic ID \"%d\","
+                                             " QoS %d.", uTimeoutElapsedMs(gTimeoutStop.timeoutStart),
                                              topicNameOut.name.id, y);
                     U_PORT_TEST_ASSERT(uMqttClientSnGetTopicNameType(&topicNameOut) ==
                                        U_MQTT_SN_TOPIC_NAME_TYPE_ID_NORMAL);
                     U_PORT_TEST_ASSERT(uMqttClientSnGetTopicId(&topicNameOut) >= 0);
                     U_PORT_TEST_ASSERT(uMqttClientSnGetTopicNameShort(&topicNameOut, topicNameShortStr) < 0);
                 } else {
-                    U_TEST_PRINT_LINE_MQTTSN("subscribe returned error %d after %d ms,"
+                    U_TEST_PRINT_LINE_MQTTSN("subscribe returned error %d after %u ms,"
                                              " module error %d.", y,
-                                             (int32_t) (uPortGetTickTimeMs() - startTimeMs),
+                                             uTimeoutElapsedMs(gTimeoutStop.timeoutStart),
                                              uMqttClientGetLastErrorCode(gpMqttContextA));
                     //lint -e(506, 774) Suppress constant value Boolean
                     U_PORT_TEST_ASSERT(false);
@@ -768,6 +769,7 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
                 }
 
                 U_PORT_TEST_ASSERT(uMqttClientGetUnread(gpMqttContextA) == 0);
+                gNumUnread = 0;
 
                 // Do this twice, once with the topic ID returned by uMqttClientSnSubscribe()
                 // above and a second time with one returned by uMqttClientSnRegisterNormalTopic()
@@ -775,9 +777,8 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
                     U_TEST_PRINT_LINE_MQTTSN("publishing %d byte(s) to topic \"%d\"...",
                                              U_MQTT_CLIENT_TEST_PUBLISH_MAX_LENGTH_BYTES,
                                              topicNameOut.name.id);
-                    startTimeMs = uPortGetTickTimeMs();
-                    gStopTimeMs = startTimeMs +
-                                  (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                     // Fill in the outgoing message buffer with all possible things
                     s = 0;
                     y = U_MQTT_CLIENT_TEST_PUBLISH_MAX_LENGTH_BYTES;
@@ -794,32 +795,33 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
                                              pMessageOut, U_MQTT_CLIENT_TEST_PUBLISH_MAX_LENGTH_BYTES,
                                              U_MQTT_QOS_EXACTLY_ONCE, false);
                     if (y == 0) {
-                        U_TEST_PRINT_LINE_MQTTSN("publish successful after %d ms.",
-                                                 (int32_t) (uPortGetTickTimeMs() - startTimeMs));
+                        U_TEST_PRINT_LINE_MQTTSN("publish successful after %u ms.",
+                                                 uTimeoutElapsedMs(gTimeoutStop.timeoutStart));
                         // We've just sent a message
                         U_PORT_TEST_ASSERT(uMqttClientGetTotalMessagesSent(gpMqttContextA) > 0);
                     } else {
-                        U_TEST_PRINT_LINE_MQTTSN("publish returned error %d after %d ms, module"
+                        U_TEST_PRINT_LINE_MQTTSN("publish returned error %d after %u ms, module"
                                                  " error %d.", y,
-                                                 (int32_t) (uPortGetTickTimeMs() - startTimeMs),
+                                                 uTimeoutElapsedMs(gTimeoutStop.timeoutStart),
                                                  uMqttClientGetLastErrorCode(gpMqttContextA));
                         //lint -e(506, 774) Suppress constant value Boolean
                         U_PORT_TEST_ASSERT(false);
                     }
 
                     U_TEST_PRINT_LINE_MQTTSN("waiting for an unread message indication...");
-                    startTimeMs = uPortGetTickTimeMs();
+                    gTimeoutStop.timeoutStart = uTimeoutStart();
+                    gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                     while ((gNumUnread == 0) &&
-                           (uPortGetTickTimeMs() - startTimeMs <
-                            (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000))) {
+                           !uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                                              gTimeoutStop.durationMs)) {
                         uPortTaskBlock(1000);
                     }
 
                     if (gNumUnread > 0) {
                         U_TEST_PRINT_LINE_MQTTSN("%d message(s) unread.", gNumUnread);
                     } else {
-                        U_TEST_PRINT_LINE_MQTTSN("no messages unread after %d ms.",
-                                                 (int32_t) (uPortGetTickTimeMs() - startTimeMs));
+                        U_TEST_PRINT_LINE_MQTTSN("no messages unread after %u ms.",
+                                                 uTimeoutElapsedMs(gTimeoutStop.timeoutStart));
                         //lint -e(506, 774) Suppress constant value Boolean
                         U_PORT_TEST_ASSERT(false);
                     }
@@ -847,6 +849,7 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
                     U_PORT_TEST_ASSERT(memcmp(pMessageIn, pMessageOut, s) == 0);
 
                     U_PORT_TEST_ASSERT(uMqttClientGetUnread(gpMqttContextA) == 0);
+                    gNumUnread = 0;
 
                     if (idRun == 0) {
                         // Now register an ID for the same topic for use on the next turn
@@ -880,8 +883,8 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
 
                 // Cancel the subscribe
                 U_TEST_PRINT_LINE_MQTTSN("unsubscribing from topic \"%d\"...", topicNameOut.name.id);
-                gStopTimeMs = uPortGetTickTimeMs() +
-                              (U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000);
+                gTimeoutStop.timeoutStart = uTimeoutStart();
+                gTimeoutStop.durationMs = U_MQTT_CLIENT_RESPONSE_WAIT_SECONDS * 1000;
                 U_PORT_TEST_ASSERT(uMqttClientSnUnsubscribeNormalTopic(gpMqttContextA, pTopicNameOutMqtt) == 0);
 
                 // Remove the callback
@@ -943,9 +946,9 @@ U_PORT_TEST_FUNCTION("[mqttClient]", "mqttClientSn")
                     U_PORT_TEST_ASSERT(gDisconnectCallbackCalled);
                 }
             } else {
-                U_TEST_PRINT_LINE_MQTTSN("connection failed after %d ms,"
+                U_TEST_PRINT_LINE_MQTTSN("connection failed after %u ms,"
                                          " with error %d, module error %d.",
-                                         (int32_t) (uPortGetTickTimeMs() - startTimeMs), z,
+                                         uTimeoutElapsedMs(gTimeoutStop.timeoutStart), z,
                                          uMqttClientGetLastErrorCode(gpMqttContextA));
                 //lint -e(506, 774) Suppress constant value Boolean
                 U_PORT_TEST_ASSERT(false);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,8 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_debug.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -127,6 +129,7 @@ typedef struct {
     void (*pClosedCallback) (uDeviceHandle_t, int32_t); /**< Set to NULL
                                                      if socket is
                                                      not in use. */
+    bool closedByRemote; /**< Will be set to true if +UUSOCL lands. */
 } uCellSockSocket_t;
 
 /** Definition of a URC handler.
@@ -226,6 +229,7 @@ static uCellSockSocket_t *pSockCreate(int32_t sockHandle,
         pSock->pAsyncClosedCallback = NULL;
         pSock->pDataCallback = NULL;
         pSock->pClosedCallback = NULL;
+        pSock->closedByRemote = false;
     }
 
     return pSock;
@@ -249,6 +253,7 @@ static void sockFree(int32_t sockHandle)
             pSock->pAsyncClosedCallback = NULL;
             pSock->pDataCallback = NULL;
             pSock->pClosedCallback = NULL;
+            pSock->closedByRemote = false;
         }
     }
 }
@@ -367,6 +372,7 @@ static void UUSOCL_urc(const uAtClientHandle_t atHandle,
                                   closedCallback,
                                   U_INT32_TO_PTR(pSocket->sockHandle));
             }
+            pSocket->closedByRemote = true;
         }
     }
 }
@@ -722,9 +728,18 @@ int32_t uCellSockInitInstance(uDeviceHandle_t cellHandle)
 // Deinitialise the cellular sockets layer.
 void uCellSockDeinit()
 {
+    uCellPrivateInstance_t *pInstance = gpUCellPrivateInstanceList;
+
     if (gInitialised) {
-        // Nothing to do, URCs will have been
-        // removed on close
+        while (pInstance != NULL) {
+            // Remove the URCs
+            for (size_t x = 0; x < sizeof(gUrcHandlers) /
+                 sizeof(gUrcHandlers[0]); x++) {
+                uAtClientRemoveUrcHandler(pInstance->atHandle,
+                                          gUrcHandlers[x].pPrefix);
+            }
+            pInstance = pInstance->pNext;
+        }
         gInitialised = false;
     }
 }
@@ -934,7 +949,7 @@ int32_t uCellSockClose(uDeviceHandle_t cellHandle,
 // Clean-up.
 void uCellSockCleanup(uDeviceHandle_t cellHandle)
 {
-    // Nothing to do
+    // Nothing to do: URCs are removed in uCellDeinit()
     (void) cellHandle;
 }
 
@@ -1567,7 +1582,7 @@ int32_t uCellSockWrite(uDeviceHandle_t cellHandle,
                     while ((leftToSendSize > 0) &&
                            (negErrnoLocalOrSize == U_SOCK_ENONE) &&
                            (x < U_CELL_SOCK_TCP_RETRY_LIMIT) &&
-                           written) {
+                           written && !pSocket->closedByRemote) {
                         if (leftToSendSize < thisSendSize) {
                             thisSendSize = leftToSendSize;
                         }
@@ -1738,7 +1753,8 @@ int32_t uCellSockRead(uDeviceHandle_t cellHandle,
                     // pending data or room in the buffer
                     while ((dataSizeBytes > 0) &&
                            (pSocket->pendingBytes > 0) &&
-                           (negErrnoLocalOrSize == U_SOCK_ENONE)) {
+                           (negErrnoLocalOrSize == U_SOCK_ENONE) &&
+                           !pSocket->closedByRemote) {
                         thisWantedReceiveSize = dataLengthMax;
                         if (thisWantedReceiveSize > (int32_t) dataSizeBytes) {
                             thisWantedReceiveSize = (int32_t) dataSizeBytes;
@@ -1956,7 +1972,7 @@ int32_t uCellSockGetHostByName(uDeviceHandle_t cellHandle,
     int32_t bytesRead = 0;
     char buffer[U_SOCK_ADDRESS_STRING_MAX_LENGTH_BYTES];
     uSockAddress_t address;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     int32_t tries = 0;
 
     memset(&address, 0, sizeof(address));
@@ -1977,17 +1993,17 @@ int32_t uCellSockGetHostByName(uDeviceHandle_t cellHandle,
         // instead of "+UDNSRN" (i.e. it adds an extra "U")
         // so, if parsing for the correct response fails and
         // we're on LENA-R8 then allow one retry.
-        startTimeMs = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         while (((atError < 0) || (bytesRead <= 0)) &&
-               ((uPortGetTickTimeMs() - startTimeMs <
-                 U_CELL_SOCK_DNS_SHOULD_RETRY_MS) ||
+               (!uTimeoutExpiredMs(timeoutStart,
+                                   U_CELL_SOCK_DNS_SHOULD_RETRY_MS) ||
                 ((pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_LENA_R8) &&
                  (tries < 2)))) {
             if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R422) {
                 // SARA-R422 can get upset if UDNSRN is sent very quickly
                 // after a connection is made so we add a short delay here
-                while (uPortGetTickTimeMs() - pInstance->connectedAtMs <
-                       U_CELL_SOCK_SARA_R422_DNS_DELAY_MILLISECONDS) {
+                while (!uTimeoutExpiredMs(pInstance->connectedAt,
+                                          U_CELL_SOCK_SARA_R422_DNS_DELAY_MILLISECONDS)) {
                     uPortTaskBlock(100);
                 }
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,19 +132,20 @@ int32_t uBleGattDiscoverChar(uDeviceHandle_t devHandle,
 int32_t uBleGattSetWriteCallback(uDeviceHandle_t devHandle,
                                  uBleGattWriteCallback_t cb);
 
-
 /* Peripheral (server) role GATT functions */
 
-/** Add a server service when in peripheral mode
- *
+/** Start adding a server service when in peripheral mode.
+ * Should be followed by uBleGattAddCharacteristic for the server
+ * characteristics and then uBleGattEndAddService to complete
+ * and activate the service.
  * Note: not all modules support this (e.g. ODIN-W2 does not).
  *
  * @param[in] devHandle   the handle of the u-blox BLE device.
  * @param[in] pUuid       pointer to a string with the service UUID.
  * @return                zero on success, on failure negative error code.
  */
-int32_t uBleGattAddService(uDeviceHandle_t devHandle,
-                           const char *pUuid);
+int32_t uBleGattBeginAddService(uDeviceHandle_t devHandle,
+                                const char *pUuid);
 
 /** Add a server characteristic when in peripheral mode
  *
@@ -160,6 +161,16 @@ int32_t uBleGattAddService(uDeviceHandle_t devHandle,
 int32_t uBleGattAddCharacteristic(uDeviceHandle_t devHandle,
                                   const char *pUuid, uint8_t properties,
                                   uint16_t *pValueHandle);
+
+/** Complete and activate a service definition initiated by uBleGattBeginAddService
+ * when in peripheral mode. The service will be activated after this call.
+ *
+ * Note: not all modules support this (e.g. ODIN-W2 does not).
+ *
+ * @param[in] devHandle   the handle of the u-blox BLE device.
+ * @return                zero on success, on failure negative error code.
+ */
+int32_t uBleGattEndAddService(uDeviceHandle_t devHandle);
 
 /** Set callback for peer notification writes when in peripheral mode.
  *
@@ -183,7 +194,6 @@ int32_t uBleGattSetNotificationCallback(uDeviceHandle_t devHandle,
  */
 int32_t uBleGattEnableNotification(uDeviceHandle_t devHandle,
                                    int32_t connHandle, uint16_t valueHandle);
-
 
 /* Common read/write GATT functions */
 

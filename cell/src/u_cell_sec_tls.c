@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,8 @@
 
 #include "u_port_os.h"
 #include "u_port_heap.h"
+
+#include "u_timeout.h"
 
 #include "u_hex_bin_convert.h"
 
@@ -972,6 +974,28 @@ void uCellSecTlsCipherSuiteListLast(uCellSecTlsContext_t *pContext)
 
         U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
     }
+}
+
+// Determine if the module supports more than one cipher suite.
+bool uCellSecTlsCipherSuiteMoreThanOne(uDeviceHandle_t cellHandle)
+{
+    bool moreThanOneCipherSuite = false;
+    const uCellPrivateModule_t *pModule;
+
+    if (gUCellPrivateMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gUCellPrivateMutex);
+
+        pModule = pUCellPrivateGetModule(cellHandle);
+        if (U_CELL_PRIVATE_HAS(pModule,
+                               U_CELL_PRIVATE_FEATURE_SECURITY_TLS_CIPHER_LIST)) {
+            moreThanOneCipherSuite = true;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gUCellPrivateMutex);
+    }
+
+    return moreThanOneCipherSuite;
 }
 
 /* ----------------------------------------------------------------

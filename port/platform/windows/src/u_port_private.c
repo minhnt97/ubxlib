@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ uPortTaskHandle_t gMutexDebugWatchdogTaskHandle = NULL;
  * uPortPrivateExitCritical() code, we need to go "around" the
  * mutex debug code by using the macro below.
  */
-#define U_PORT_MUTEX_LOCK_NO_MUTEX_DEBUG(x)      { U_ASSERT(_uPortMutexLock(((uPortPrivatePartialMutexInfo_t *) x)->handle) == 0)
+#define U_PORT_MUTEX_LOCK_NO_MUTEX_DEBUG(x)      U_ASSERT(_uPortMutexLock(((uPortPrivatePartialMutexInfo_t *) x)->handle) == 0)
 
 /** Bypass mutex debug for unlock: On Windows the functions
  * uPortPrivateEnterCritical()/uPortPrivateExitCritical() are
@@ -89,15 +89,15 @@ uPortTaskHandle_t gMutexDebugWatchdogTaskHandle = NULL;
  * uPortPrivateExitCritical() code, we need to go "around" the
  * mutex debug code by using the macro below.
  */
-#define U_PORT_MUTEX_UNLOCK_NO_MUTEX_DEBUG(x)    } U_ASSERT(_uPortMutexUnlock(((uPortPrivatePartialMutexInfo_t *) x)->handle) == 0)
+#define U_PORT_MUTEX_UNLOCK_NO_MUTEX_DEBUG(x)    U_ASSERT(_uPortMutexUnlock(((uPortPrivatePartialMutexInfo_t *) x)->handle) == 0)
 #else
 /** Mutex lock helper macro.
  */
-#define U_PORT_MUTEX_LOCK_NO_MUTEX_DEBUG       U_PORT_MUTEX_LOCK
+#define U_PORT_MUTEX_LOCK_NO_MUTEX_DEBUG(x)      uPortMutexLock(x)
 
 /** Mutex unlock helper macro.
  */
-#define U_PORT_MUTEX_UNLOCK_NO_MUTEX_DEBUG     U_PORT_MUTEX_UNLOCK
+#define U_PORT_MUTEX_UNLOCK_NO_MUTEX_DEBUG(x)    uPortMutexUnlock(x)
 #endif
 
 /* ----------------------------------------------------------------
@@ -189,7 +189,7 @@ static const int32_t localToWinPriority[] = {-2,  // 0
                                              1,   // 13
                                              1,   // 14
                                              1    // 15
-                                             };
+                                            };
 
 /** List of thread IDs.  We only need to keep track of the IDs
  * in order to implement a version of crtitical section
@@ -542,6 +542,7 @@ int32_t uPortPrivateEnterCritical()
     if (gMutexThread != NULL) {
         errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
 
+        // Lock gMutexThread, to protect the list of threads
         U_PORT_MUTEX_LOCK_NO_MUTEX_DEBUG(gMutexThread);
 
         U_ASSERT(!gInCriticalSection);
@@ -573,7 +574,7 @@ int32_t uPortPrivateEnterCritical()
 
         gInCriticalSection = true;
 
-        U_PORT_MUTEX_UNLOCK_NO_MUTEX_DEBUG(gMutexThread);
+        // DO NOT UNLOCK gMutexThread: uPortPrivateExitCritical() will do that
     }
 
     return (int32_t) errorCode;
@@ -588,8 +589,6 @@ int32_t uPortPrivateExitCritical()
 
     if (gMutexThread != NULL) {
         errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-
-        U_PORT_MUTEX_LOCK_NO_MUTEX_DEBUG(gMutexThread);
 
         U_ASSERT(gInCriticalSection);
 
@@ -616,6 +615,7 @@ int32_t uPortPrivateExitCritical()
 
         gInCriticalSection = false;
 
+        // NOW we can unlock gMutexThread
         U_PORT_MUTEX_UNLOCK_NO_MUTEX_DEBUG(gMutexThread);
     }
 

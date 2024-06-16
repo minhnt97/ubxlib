@@ -17,7 +17,7 @@ If you intend to take a long-term log of an unattended device you may also wish 
 If you suspect an issue with control characters on the AT interface, you may cause these to be printed as hex in the log output by defining `U_AT_CLIENT_PRINT_CONTROL_CHARACTERS` in your build.
 
 # GNSS Interface Debugging
-Similar to the AT Client, to debug interactions with GNSS you will want to print the UBX message exchanges with the device; if you opened the GNSS device/network with the `uDevice`/`uNetwork` API these will be on by default, else you may enable them by calling `uGnssSetUbxMessagePrint()` with `true`.
+Similar to the AT Client, to debug interactions with GNSS you will want to print the UBX message exchanges with the device; if you opened the GNSS device/network with the `uDevice`/`uNetwork` API these will be on by default, else you may enable them by calling `uGnssSetUbxMessagePrint()` with `true`.  There is also a Python script in the [gnss/api](/gnss/api) directory, [u_gnss_ucenter_ubx.py](/gnss/api/u_gnss_ucenter_ubx.py), which can parse the `ubxlib` log output looking for the `UBX` messages passed between the GNSS device and this MCU and put them into a file, or pass them out of a serial port, that can be read by the u-blox [uCenter tool](https://www.u-blox.com/en/product/u-center); see the [README.md](/gnss/api) in that directory for how to install and use it.
 
 # Adding Your Own Debug Prints
 You may add your own `uPortLog()` calls to any `.c` file to print interesting stuff; if you are doing this to a `.c` file within `ubxlib` itself, make sure that [u_port_debug.h](/port/api/u_port_debug.h) is included in the `.c` file and, before it, [u_cfg_sw.h](/cfg/u_cfg_sw.h), otherwise the `uPortLog()` macro will do nothing for you (within `ubxlib` we include only the required headers in each `.c` file, rather than including everything via `ubxlib.h`, and if the `.c` file originally contained no prints the headers won't have been included).
@@ -70,6 +70,9 @@ The same principle applies to all things within `ubxlib` that use tasks: see for
 
 Should you suspect that anything is running out of stack you may add calls to these functions to find out how close things are.
 
+# Debugging A Stack Overflow
+If you find that things "go bang" because a stack breach happens in a very narrow window, before a stack usage diagnostic that you have added (see previous section) is called, you might find in the code where the task's stack is initially allocated (tasks are usually given a name for diagnostic purposes, which some platform stack overflow detectors will print (e.g. ESP-IDF does), so you could search the code for that name) and hack the code to add a fixed amount (e.g. 2048 bytes) to it; then when the "StackMinFree" call goes below 2048, you will know that you've reached the event of interest and can decide whether it is something that can be fixed/optimized or whether it is simply necessary to make the stack size for that task larger.
+
 # Locating A Mutex Lock-Up
 `ubxlib` is designed to be thread-safe and hence makes frequent use of mutexes, all of which are simple non-recursive mutexes.  A down-side of this is that it is possible for code to "get stuck" waiting for a mutex which will never be unlocked.
 
@@ -105,7 +108,7 @@ addr2line.exe -e my_app.elf 0x400d3e6f
 
 ...where `0x400d3e6f` is the last address in the backtrace; repeat until done.
 
-# Debugging A U_ASSERT
+# Debugging A `U_ASSERT()`
 There are a few [U_ASSERT()](/common/assert) checks in the `ubxlib` code; deliberately few: as a library we prefer return-values that give the application control, to going "bang" in an unstructured fashion.  You may add your own assert function at run-time, by calling `uAssertHookSet()`, to make more sense of what might be going on; if you do not do so, an assertion will print a useful message (through `uPortLog()`) and the code will sit in an infinite loop.
 
 If you add your own assert function then, during testing, you may also chose to define `U_ASSERT_HOOK_FUNCTION_TEST_RETURN` for your build; in this case code execution will continue as normal after the assertion.  To be clear, `U_ASSERT_HOOK_FUNCTION_TEST_RETURN` ONLY takes effect if you have added your own assert function, it does nothing if the default assert function is in use, and you should _really_ only use it when testing as assertions indicate that the world has likely fallen apart; you do not normally want to continue.
@@ -121,7 +124,7 @@ Place calls to `uLogRam()` anywhere in the `.c` file(s) where you wish to log an
 
 This will record a millisecond timestamp (32 bits), the logging event that occurred (in this case `U_LOG_RAM_EVENT_USER_0`) and the value of `x` (32 bits).  By convention, if no parameter is required for a log event then 0 should be used.  
 
-Near the end of your application, or wherever you want to dump (and empty) the contents of the RAM log, call `uLogRamPrint()`.
+Near the end of your application, or wherever you want to dump (and empty) the contents of the RAM log, call `uLogRamPrint(NULL)`.
 
 Events `U_LOG_RAM_EVENT_USER_0` to `U_LOG_RAM_EVENT_USER_9` are provided; you may add your own RAM log events in [u_log_ram_enum_user.h](/port/platform/common/log_ram/u_log_ram_enum_user.h)/[u_log_ram_string_user.h](/port/platform/common/log_ram/u_log_ram_string_user.h) if the problem is particularly complex.
 
@@ -134,3 +137,23 @@ You may find [Visual Studio Code](https://code.visualstudio.com/) a convenient I
 - If you wish to run the `ubxlib` tests on an MCU, open [ubxlib-runner.code-workspace](/ubxlib-runner.code-workspace) in [Visual Studio Code](https://code.visualstudio.com/), select the "Run and Debug" icon on the far left and then select an option from the "RUN AND DEBUG" pull-down on the top left.
 
 From these cases you should be able to figure out how to use [Visual Studio Code](https://code.visualstudio.com/) with `ubxlib` for your own application; likely a lot simpler if you have chosen a single platform and aren't running the `ubxlib` tests.
+
+# Bringing Up A New MCU Board
+When bringing up a new MCU board, particularly an off-the-shelf board, which is usually blessed with a million configuration jumpers and sometimes "useful" peripheral devices, it is often the case that nothing works.  And this is often because which IO pin from the MCU is connected to the outside world is extremely difficult to be certain about.
+
+Most MCUs allow an IO pin to be used as a GPIO as well as a UART/I2C/SPI/whatever pin; if you find that an IO pin is not working, it is a good idea to temporarily configure that pin as a GPIO output, toggle it, and check with a multimeter or [Saleae](https://www.saleae.com/) probe or oscilloscope that the pin really is under your control.  For example, to check if pin 5 is yours you might do something like:
+
+```
+uPortGpioConfig_t gpioConfig = U_PORT_GPIO_CONFIG_DEFAULT;
+
+gpioConfig.pin = 5;
+gpioConfig.direction = U_PORT_GPIO_DIRECTION_OUTPUT;
+uPortGpioSet(gpioConfig.pin, 0);
+uPortGpioConfig(&gpioConfig);
+uPortGpioSet(gpioConfig.pin, 1);
+uPortTaskBlock(1000);
+uPortGpioSet(gpioConfig.pin, 0);
+uPortTaskBlock(1000);
+```
+
+If, when you run this code, pin 5 goes high for 1 second and then low for 1 second, it is yours.

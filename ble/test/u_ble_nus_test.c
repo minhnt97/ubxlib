@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 u-blox
+ * Copyright 2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,6 @@
 #include "u_ble_gatt.h"
 #include "u_ble_nus.h"
 
-
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
  * -------------------------------------------------------------- */
@@ -96,7 +95,7 @@
 #define HAS_RESPONSE (gPeerResponse[0] != 0)
 #define SERVER_FOUND (gPeerMac[0] != 0)
 // Connection wait time in seconds. The external server and client may be busy
-#define PEER_WAIT_TIME_S 100
+#define PEER_WAIT_TIME_S 180
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -206,7 +205,6 @@ static void postamble()
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
 
-
 /** BLE NUS client test.
  */
 U_PORT_TEST_FUNCTION("[bleNus]", "bleNusClient")
@@ -218,7 +216,8 @@ U_PORT_TEST_FUNCTION("[bleNus]", "bleNusClient")
         U_TEST_PRINT_LINE("try #%d", i + 1);
         U_PORT_TEST_ASSERT(uBleGapScan(gDeviceHandle,
                                        U_BLE_GAP_SCAN_DISCOVER_ALL_ONCE,
-                                       true, 10000,
+                                       true,
+                                       9500, // This value is due to the current fixed AT-timeout in ucx (10s)
                                        scanResponse) == 0);
     }
     U_PORT_TEST_ASSERT(SERVER_FOUND);
@@ -255,6 +254,7 @@ U_PORT_TEST_FUNCTION("[bleNus]", "bleNusClient")
 U_PORT_TEST_FUNCTION("[bleNus]", "bleNusServer")
 {
     int32_t x;
+    int32_t y;
     preamble(U_BLE_CFG_ROLE_PERIPHERAL);
     U_TEST_PRINT_LINE("init NUS Service");
     x = uBleNusInit(gDeviceHandle, NULL, peerIncoming);
@@ -265,11 +265,15 @@ U_PORT_TEST_FUNCTION("[bleNus]", "bleNusServer")
         uint8_t advData[32];
         uint8_t respData[32];
         gAdvCfg.pRespData = respData;
-        gAdvCfg.respDataLength = uBleNusSetAdvData(respData, sizeof(respData));
+        y = uBleNusSetAdvData(respData, sizeof(respData));
+        U_PORT_TEST_ASSERT(y >= 0);
+        gAdvCfg.respDataLength = (uint8_t)y;
         gAdvCfg.pAdvData = advData;
-        gAdvCfg.advDataLength = uBleGapSetAdvData(INT_SERVER_NAME,
-                                                  manufData, sizeof(manufData),
-                                                  advData, sizeof(advData));
+        y = uBleGapSetAdvData(INT_SERVER_NAME,
+                              manufData, sizeof(manufData),
+                              advData, sizeof(advData));
+        U_PORT_TEST_ASSERT(y >= 0);
+        gAdvCfg.advDataLength = (uint8_t)y;
         U_PORT_TEST_ASSERT(gAdvCfg.respDataLength > 0 && gAdvCfg.advDataLength > 0);
         U_TEST_PRINT_LINE("start advertising");
         U_PORT_TEST_ASSERT(uBleGapAdvertiseStart(gDeviceHandle, &gAdvCfg) == 0);

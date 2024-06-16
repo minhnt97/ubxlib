@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,8 @@
 #include "u_port_debug.h"
 #include "u_port_gpio.h"
 #include "u_port_uart.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -237,7 +239,7 @@ static int32_t uShortRangeAdd(uShortRangeModuleType_t moduleType,
             pInstance->devHandle = pDevInstance;
             pInstance->atHandle = atHandle;
             pInstance->mode = U_SHORT_RANGE_MODE_EDM;
-            pInstance->startTimeMs = 500;
+            pInstance->timeoutStart = uTimeoutStart();
             pInstance->urcConHandlerSet = false;
             pInstance->sockNextLocalPort = -1;
             pInstance->uartHandle = uartHandle;
@@ -330,7 +332,6 @@ static int32_t parseBdAddr(const char *pStr, uint8_t *pDstAddr)
     return (int32_t)U_ERROR_COMMON_SUCCESS;
 }
 
-
 static int32_t parseIpv4Addr(char *pStr, uint8_t *pDstIp)
 {
     // Parse string: "192.168.0.1"
@@ -390,7 +391,6 @@ static int32_t parseUint16(int32_t value, uint16_t *pDst)
     }
     return (int32_t)U_ERROR_COMMON_UNKNOWN;
 }
-
 
 //+UUDPC:<peer_handle>,<type>,<profile>,<address>,<frame_size>
 //lint -esym(818, pParameter) Suppress pParameter could be const, need to
@@ -856,6 +856,20 @@ int32_t uShortRangeOpenUart(uShortRangeModuleType_t moduleType,
 
     uShortRangeEdmStreamSetAtHandle(edmStreamHandle, atClientHandle);
 
+    if (moduleType == U_SHORT_RANGE_MODULE_TYPE_ANY) {
+        moduleType = uShortRangeDetectModule(*pDevHandle);
+        uShortRangePrivateInstance_t *pInstance;
+        pInstance = pUShortRangePrivateGetInstance(*pDevHandle);
+        if (pInstance != NULL) {
+            pInstance->pModule = &gUShortRangePrivateModuleList[moduleType - 1];
+            uAtClientTimeoutSet(atClientHandle, pInstance->pModule->atTimeoutSeconds * 1000);
+            uAtClientDelaySet(atClientHandle, pInstance->pModule->commandDelayMs);
+            uPortLog("U_SHORT_RANGE: Module %d identified and set sucessfully\n",
+                     pInstance->pModule->moduleType);
+        } else {
+            return (int32_t)U_SHORT_RANGE_ERROR_INIT_INTERNAL;
+        }
+    }
     if (restart) {
         if (restartModuleAndEnterEDM(*pDevHandle) != (int32_t) U_ERROR_COMMON_SUCCESS) {
             uShortRangeClose(*pDevHandle);
@@ -1062,6 +1076,37 @@ const uShortRangeModuleInfo_t *uShortRangeGetModuleInfo(int32_t moduleType)
         }
     }
     return NULL;
+}
+
+int32_t uShortRangeGetFirmwareVersionStr(uDeviceHandle_t devHandle,
+                                         char *pStr, size_t size)
+{
+    uAtClientHandle_t atHandle;
+    uShortRangePrivateInstance_t *pInstance;
+    int32_t readBytes;
+    int32_t err = (int32_t)U_ERROR_COMMON_INVALID_PARAMETER;
+
+    if (gUShortRangePrivateMutex == NULL) {
+        return (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    }
+
+    pInstance = pUShortRangePrivateGetInstance(devHandle);
+
+    if ((pInstance != NULL) && (pStr != NULL) && (size > 0)) {
+        atHandle = pInstance->atHandle;
+        uAtClientLock(atHandle);
+        uAtClientCommandStart(atHandle, "AT+CGMR");
+        uAtClientCommandStop(atHandle);
+        uAtClientResponseStart(atHandle, NULL);
+        readBytes = uAtClientReadString(atHandle, pStr, size, false);
+        uAtClientResponseStop(atHandle);
+        err = uAtClientUnlock(atHandle);
+        if ((readBytes >= 0) && (err == (int32_t)U_ERROR_COMMON_SUCCESS)) {
+            err = readBytes;
+        }
+    }
+
+    return err;
 }
 
 int32_t uShortRangeGetSerialNumber(uDeviceHandle_t devHandle, char *pSerialNumber)

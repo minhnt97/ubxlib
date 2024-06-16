@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,8 @@
 #include "u_cfg_test_platform_specific.h"
 
 #include "u_error_common.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h" // Required by u_gnss_private.h
 
@@ -253,8 +255,8 @@ U_PORT_TEST_FUNCTION("[gnssInfo]", "gnssInfoTime")
 {
     uDeviceHandle_t gnssHandle;
     int32_t resourceCount;
-    int64_t y = -1;
-    int32_t startTimeMs;
+    int64_t y;
+    uTimeoutStart_t timeoutStart;
     size_t iterations;
     uGnssTransportType_t transportTypes[U_GNSS_TRANSPORT_MAX_NUM];
 
@@ -284,23 +286,28 @@ U_PORT_TEST_FUNCTION("[gnssInfo]", "gnssInfoTime")
         U_TEST_PRINT_LINE("setting UTC standard to automatic..\n");
         U_PORT_TEST_ASSERT(uGnssCfgSetUtcStandard(gnssHandle, U_GNSS_UTC_STANDARD_AUTOMATIC) == 0);
 
-        // Ask for time, allowing a few tries in case the GNSS receiver
+        // Ask for the raw UTC time: should return a non-negative value
+        y = uGnssInfoGetTimeUtcRaw(gnssHandle);
+        U_PORT_TEST_ASSERT(y >= 0);
+        y = -1;
+
+        // Ask for accurate UTC time, allowing a few tries in case the GNSS receiver
         // has not yet found time
         U_TEST_PRINT_LINE("waiting up to %d second(s) to establish UTC time...",
                           U_GNSS_TIME_TEST_TIMEOUT_SECONDS);
-        startTimeMs = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         while ((y < 0) &&
-               (uPortGetTickTimeMs() - startTimeMs < (U_GNSS_TIME_TEST_TIMEOUT_SECONDS * 1000))) {
+               !uTimeoutExpiredSeconds(timeoutStart,
+                                       U_GNSS_TIME_TEST_TIMEOUT_SECONDS)) {
             y = uGnssInfoGetTimeUtc(gnssHandle);
         }
         if (y > 0) {
-            U_TEST_PRINT_LINE("UTC time according to GNSS is %d (took %d second(s)"
+            U_TEST_PRINT_LINE("UTC time according to GNSS is %d (took %u second(s)"
                               " to establish).", (int32_t) y,
-                              (int32_t) (uPortGetTickTimeMs() - startTimeMs) / 1000);
+                              uTimeoutElapsedSeconds(timeoutStart));
         } else {
-            U_TEST_PRINT_LINE("could not get UTC time from GNSS after %d second(s) (%d).",
-                              (int32_t) (uPortGetTickTimeMs() - startTimeMs) / 1000,
-                              (int32_t) y);
+            U_TEST_PRINT_LINE("could not get UTC time from GNSS after %u second(s) (%d).",
+                              uTimeoutElapsedSeconds(timeoutStart), (int32_t) y);
         }
         U_PORT_TEST_ASSERT(y > U_GNSS_TEST_MIN_UTC_TIME);
 

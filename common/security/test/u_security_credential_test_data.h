@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,7 +123,6 @@ extern const uint8_t gUSecurityCredentialTestClientX509Pem[];
  * asking for the size of a partially defined type.
  */
 extern const size_t gUSecurityCredentialTestClientX509PemSize;
-
 
 #ifdef U_SECURITY_CREDENTIAL_TEST_FORMATS
 

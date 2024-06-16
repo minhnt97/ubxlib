@@ -13,12 +13,14 @@ The cellular APIs are split into the following groups:
 - `sock`: sockets, for exchanging data (but see the [common/sock](/common/sock) component for the best way to do this).
 - `mqtt`: MQTT client (but see the [common/mqtt_client](/common/mqtt_client) component for the best way to do this).
 - `http`: HTTP client  (but see the [common/http_client](/common/http_client) component for the best way to do this).
-- `loc`: getting a location fix anywhere using the Cell Locate service (but see the [common/location](/common/location) component for the best way to do this) and using the Assist Now service to improve the time to - `time`: support for CellTime, a feature through which accurate HW timing may be achieved using cellular and/or GNSS (SARA-R5 only).
-first fix when a GNSS module is included inside or connected-via the cellular module; you will need an authentication token from the [Location Services section](https://portal.thingstream.io/app/location-services) of your [Thingstream portal](https://portal.thingstream.io/app/dashboard). If you have a GNSS chip inside or connected via a cellular module and want to control it directly from your MCU see the [gnss](/gnss) API but note that the `loc` API here will make use of a such a GNSS chip in any case.
+- `loc`: getting a location fix anywhere using the Cell Locate service (but see the [common/location](/common/location) component for the best way to do this) and using the Assist Now service to improve the time to first fix when a GNSS module is included inside or connected-via the cellular module; you will need an authentication token from the [Location Services section](https://portal.thingstream.io/app/location-services) of your [Thingstream portal](https://portal.thingstream.io/app/dashboard).  If you have a GNSS chip inside or connected via a cellular module and want to control it directly from your MCU see the [gnss](/gnss) API but note that the `loc` API here will make use of a such a GNSS chip in any case.
+- `geofence`: flexible MCU-based geofencing, using the common [geofence](/common/geofence/api/u_geofence.h) API with CellLocate, only included if `U_CFG_GEOFENCE` is defined since maths and floating point operations are required; to use WGS84 coordinates and a true-earth model rather than a sphere, see instructions at the top of [u_geofence_geodesic.h](/common/geofence/api/u_geofence_geodesic.h) and the note in the [README.md](/common/geofence) there about [GeographicLib](https://github.com/geographiclib).
+- `time`: support for CellTime, a feature through which accurate HW timing may be achieved using cellular and/or GNSS (SARA-R5 only).
 - `gpio`: configure and set the state of GPIO lines that are on the cellular module.
 - `file`: access to file storage on the cellular module.
 - `fota`: access to information about the state of FOTA in the cellular module.
 - `mux`: support for 3GPP 27.010 CMUX mode.
+- `sim`: SIM access; this API is deliberately minimal since applications that employ `ubxlib` don't generally use SIM PINs, don't need phone-book access, etc.
 
 The module types supported by this implementation are listed in [u_cell_module_type.h](api/u_cell_module_type.h).
 
@@ -27,6 +29,18 @@ HOWEVER, this is the detailed API; if all you would like to do is bring up a bea
 This API relies upon the [common/at_client](/common/at_client) component to send commands to and parse responses received from a cellular module.
 
 The operation of `ubxlib` does not rely on a particular FW version of the cellular module; the module FW versions that we test with are listed in the [test](test) directory.
+
+# LENA-R8 Limitations
+Note that support for LENA-R8 has the following limitations: 
+
+- LENA-R8001M10 does not support access to the internal GNSS chip via CMUX; the older `AT+UGUBX` message interface must be used and streamed position cannot be supported this way.  If you require streamed position, please either:
+  - access the internal GNSS chip over either the USB interface instead (i.e. call `uCellCfgSetGnssProfile()` with the bit `U_CELL_CFG_GNSS_PROFILE_USB_AUX_UART` set, connect your MCU also to the USB interface of LENA-R8 and open the `ubxlib` GNSS device, separately, on that USB port), or
+  - connected a separate UART from your MCU to the dedicated `TXD_GNSS`/`RXD_GNSS` pins provided by the LENA-R8001M10 module (baud rate 38400) and open the built-in GNSS chip as an entirely separate GNSS device, not under the control of the cellular part of the LENA-R8001M10 module.
+- LENA-R8 does not support HTTP properly, hence HTTP support is disabled for LENA-R8.
+- LENA-R8 does not support security on an MQTTSN connection.
+- LENA-R8 does not support reading any of the LTE-related RF parameters (RSRP, RSRQ, EARFCN or physical cell ID), just the 2G-related RF parameters (RSSI, CSQ and logical cell ID, though not ARFCN).
+- LENA-R8 does not support reading the DNS address set by the network or the APN currently in use.
+- LENA-R8 does not support use of a PPP connection on the same PDP context as the on-board IP/MQTT/HTTP clients; this _should_ not be an issue, see the PPP section below for more details.
 
 # Usage
 The [api](api) directory contains the files that define the cellular APIs, each API function documented in its header file.  In the [src](src) directory you will find the implementation of the APIs and in the [test](test) directory the tests for the APIs that can be run on any platform.
@@ -127,3 +141,14 @@ int app_start() {
     while(1);
 }
 ```
+
+# PPP-Level Integration With A Platform
+PPP-level integration between the bottom of a platform's IP stack and cellular is supported on some platforms and some module types, currently only ESP-IDF, Zephyr and Linux with SARA-U201, SARA-R5, SARA-R422 and LENA-R8.  This allows the native clients of the platform (e.g. MQTT etc.) to be used in your application with a cellular transport beneath them.
+
+To enable this integration you must define `U_CFG_PPP_ENABLE` for your build.  Other switches/components/whatevers may also be required on the platform side: see the README.md in the relevant platform directory for details.
+
+To use the integration, just make a cellular connection with `ubxlib` in the usual way and the connection will be available to the platform.
+
+Note: in the case of LENA-R8 it is not possible to use the same PDP context for PPP as for AT-command-based operation: if you do so then, once PPP is active, commands such as `uSockGetHostByName()` and any attempt to use the MQTT or HTTP clients inside LENA-R8 will fail.  Hence we set the PDP context for PPP operation to be separate.  It is POSSIBLE that there are cellular networks out there which will not allow more than one PDP context, in which case connections for LENA-R8 will fail when `U_CFG_PPP_ENABLE` is defined for the build; should this happen then you should compile this code with `U_CELL_PRIVATE_PPP_CONTEXT_ID_LENA_R8` set to -1 and the code will use the same PDP context for both (and the on-module clients will not be available to your application while PPP is active).
+
+Note: if you are required to supply a username and password for your connection and your platform permits you to do that via a `ubxlib` API (only ESP-IDF currently does this; see the `README.md` files in the Zephyr and Linux directories for how to do this on those platforms) then, when using PPP, you must call `uCellNetSetAuthenticationMode()` to set the authentication mode explicitly; automatic authentication mode will not work with PPP.

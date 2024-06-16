@@ -24,7 +24,7 @@ timeout_checkout_seconds = 60 * 5
 timeout_build_seconds = 60 * 30 // Long because on first run tools may have to be installed
 timeout_power_up_seconds = 60
 timeout_flash_seconds = 60 * 30 // Long because on first run tools may have to be installed
-timeout_test_seconds = 60 * 60
+timeout_test_seconds = 85 * 60 // Really don't want more than 3600 but testing is just beginning to edge over that
 check_instance_max = 9
 dut_start_time_seconds = 10
 
@@ -175,7 +175,11 @@ def dockerCommand(cmd, relWorkspaceDir=".", extra_env=[]) {
     def id = sh(script: "id -u -n", returnStdout: true).trim()
     // Needs --privileged to access TTY devices (since there is no dialout group
     // in the docker image) and -v /dev:/dev to map the devices into the docker image
-    sh "docker run -i -u ${id} --rm --privileged -v /dev:/dev -w ${env.WORKSPACE}/$relWorkspaceDir $volume_args $env_args ubxlib_builder /bin/bash -c \"$cmd\""
+    // NET_ADMIN capability is added so that, for the case where we are running on
+    // Linux inside the Docker image, the script can prevent Linux from using eth0
+    // by mistake (rather than some PPP or whatever interface provided by the module
+    // it is meant to be testing)
+    sh "docker run -i -u ${id} --rm --privileged --cap-add NET_ADMIN -v /dev:/dev -w ${env.WORKSPACE}/$relWorkspaceDir $volume_args $env_args ubxlib_builder /bin/bash -c \"$cmd\""
 }
 
 // Perform a check-out stage
@@ -426,7 +430,7 @@ def buildAndTestPipeline(instance_str, json_entry, filter) {
                                     }
                                 } finally {
                                     // Store summary-, debug- and test report file as artifacts
-                                    archiveArtifacts artifacts: "${instance_workdir}/**/${summary_file}, ${instance_workdir}/**/${test_report_file}, ${instance_workdir}/**/${debug_file}, ${instance_workdir}/**/*.hex, ${instance_workdir}/**/*.bin, ${instance_workdir}/**/*.elf, ${instance_workdir}/**/*.exe, ${instance_workdir}/**/*.map, ${instance_workdir}/*.kml, ${instance_workdir}/**/analyze_html/*", allowEmptyArchive: true
+                                    archiveArtifacts artifacts: "${instance_workdir}/**/${summary_file}, ${instance_workdir}/**/${test_report_file}, ${instance_workdir}/**/${debug_file}, ${instance_workdir}/**/*.hex, ${instance_workdir}/**/*.bin, ${instance_workdir}/**/*.elf, ${instance_workdir}/**/*.exe, ${instance_workdir}/**/*.map, ${instance_workdir}/*.kml,  ${instance_workdir}/*.log, ${instance_workdir}/**/analyze_html/*", allowEmptyArchive: true
                                     if (test_report_arg != "") {
                                         // Record the test results
                                         junit(testResults: "${working_dir}/${instance_str}/${test_report_file}", allowEmptyResults: true, skipOldReports: true, skipPublishingChecks: true)

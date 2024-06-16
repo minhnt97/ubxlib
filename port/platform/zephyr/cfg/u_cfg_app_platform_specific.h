@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,21 +17,26 @@
 #ifndef _U_CFG_APP_PLATFORM_SPECIFIC_H_
 #define _U_CFG_APP_PLATFORM_SPECIFIC_H_
 
+/* This inclusion is required to get the Zephyr version.
+ */
+#include <version.h>
+
 /* This inclusion is required to get the UART CTS/RTS pin assignments
  * from the Zephyr device tree.
  */
-#include "devicetree.h"
-
-/* This inclusion is required to get the Zephyr version.
- */
-#include "version.h"
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/devicetree.h>
+#else
+#include <devicetree.h>
+#endif
 
 /** @file
  * @brief This header file contains configuration information for
  * a Zephyr platform that is fed in at application level, with one
- * exception (see below).  It assumes an nRF5x MCU, e.g. nRF52840 or
- * nRF5340. You should override these values as necessary for your particular
- * platform.
+ * exception (see below).  You should override these values as necessary
+ * for your particular platform.   NONE of the parameters here are
+ * compiled into ubxlib itself.
+ *
  * Note that the pin numbers used below should be those of the MCU: if you
  * are using an MCU inside a u-blox module the IO pin numbering for
  * the module is likely different to that from the MCU: check the data
@@ -125,9 +130,10 @@
  * COMPILE-TIME MACROS FOR A CELLULAR MODULE ON ZEPHYR/NRF5x: MISC
  * -------------------------------------------------------------- */
 
-#if defined(CONFIG_BOARD_UBX_EVKNORAB1_NRF5340_CPUAPP) || \
-    defined(CONFIG_BOARD_NRF5340PDK_NRF5340_CPUAPP)    || \
-    defined(CONFIG_BOARD_NRF5340DK_NRF5340_CPUAPP)
+#ifndef U_CFG_APP_CELL_UART
+# if defined(CONFIG_BOARD_UBX_EVKNORAB1_NRF5340_CPUAPP) || \
+     defined(CONFIG_BOARD_NRF5340PDK_NRF5340_CPUAPP)    || \
+     defined(CONFIG_BOARD_NRF5340DK_NRF5340_CPUAPP)
 /** The UARTE HW block to use inside the NRF53 chip when
  * communicating with a cellular module.
  * NOTE: this used to be 1 however, with I2C added, which has to
@@ -137,17 +143,24 @@
  * you can't have I2C/SPI and UART on the same HW block and there
  * are more UARTs available on NRF53.
  */
-# ifndef U_CFG_APP_CELL_UART
 #  define U_CFG_APP_CELL_UART       3
-# endif
-#else
+# elif defined(CONFIG_BOARD_NUCLEO_F767ZI)
+/** UART HW block to use inside STM32F767ZI when communicating
+ * with a cellular module.
+ */
+#  define U_CFG_APP_CELL_UART       6
+# elif defined(CONFIG_BOARD_NUCLEO_U575ZI_Q)
+/** UART HW block to use inside STM32U575ZI when communicating
+ * with a cellular module.
+ */
+#  define U_CFG_APP_CELL_UART       2
+# else
 /** The UARTE HW block to use inside the NRF52 chip or on Linux
  * when communicating with a cellular module.
  */
-# ifndef U_CFG_APP_CELL_UART
 #  define U_CFG_APP_CELL_UART       1
 # endif
-#endif
+#endif // #ifndef U_CFG_APP_CELL_UART
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS FOR ZEPHYR/NRF5x: PINS FOR CELLULAR
@@ -161,6 +174,12 @@
 #endif
 
 #ifndef U_CFG_APP_PIN_CELL_PWR_ON
+# if defined(CONFIG_BOARD_NUCLEO_F767ZI) || defined(CONFIG_BOARD_NUCLEO_U575ZI_Q)
+/** The STM32 GPIO output that is connected to the PWR_ON
+ * pin of the cellular module.
+ */
+#  define U_CFG_APP_PIN_CELL_PWR_ON            0x5e // Arduino header pin D4, or pin F14 in STM32 port numbering
+# else
 /** The NRF5x GPIO output that is connected to the PWR_ON
  * pin of the cellular module.  Note that if you are using
  * the Nordic NRF5340 DK board configuration and the version of
@@ -168,7 +187,8 @@
  * use this pin for something and hence it is better to change
  * it, e.g. to pin 36 (AKA 1.04).
  */
-# define U_CFG_APP_PIN_CELL_PWR_ON            33 // AKA 1.01
+#  define U_CFG_APP_PIN_CELL_PWR_ON            33 // AKA 1.01
+# endif
 #endif
 
 #ifndef U_CFG_APP_PIN_CELL_RESET
@@ -289,7 +309,8 @@
 #ifndef U_CFG_APP_GNSS_I2C
 /** The I2C HW block to use inside the NRF5x chip to communicate
  * with a GNSS module.  If this is required, please use number 1
- * as that is the one that the NRFx drivers used by Zephyr supports.
+ * as that is the one that the NRFx drivers used by Zephyr supports
+ * and it is also the default for the Nucleo_U575ZI_q board.
  * You will also need to set the following in your prj.cnf file:
  *
  * CONFIG_I2C=y
@@ -326,7 +347,7 @@
  * -------------------------------------------------------------- */
 
 #ifndef U_CFG_APP_PIN_GNSS_ENABLE_POWER
-/** The NRF5x GPIO output that that enables power to the GNSS
+/** The NRF5x GPIO output that enables power to the GNSS
  * module, use -1 if there is no such control.
  */
 # define U_CFG_APP_PIN_GNSS_ENABLE_POWER       -1

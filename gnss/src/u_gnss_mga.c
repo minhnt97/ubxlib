@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_debug.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -145,7 +147,6 @@ static const uErrorCode_t gMgaApiResultToError[] = {
     U_ERROR_COMMON_NOT_FOUND, // MGA_API_NO_MGA_INI_TIME
     U_ERROR_COMMON_EMPTY      // MGA_API_NO_DATA_TO_SEND
 };
-
 
 /** The body of the smallest UBX-MGA-FLASH-DATA message, used to erase it.
  */
@@ -390,7 +391,7 @@ static int32_t ubxMgaSendWaitAck(uGnssPrivateInstance_t *pInstance,
                                  size_t messageBodyLengthBytes)
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     // The UBX-MGA-ACK message ID
     uGnssPrivateMessageId_t ackMessageId = {.type = U_GNSS_PROTOCOL_UBX,
                                             .id.ubx = 0x1360
@@ -414,7 +415,7 @@ static int32_t ubxMgaSendWaitAck(uGnssPrivateInstance_t *pInstance,
             if (x == messageBodyLengthBytes + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES) {
                 errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
                 // Wait for the UBX-MGA-ACK-DATA0 response for our message ID
-                startTimeMs = uPortGetTickTimeMs();
+                timeoutStart = uTimeoutStart();
                 do {
                     x = uGnssPrivateReceiveStreamMessage(pInstance, &ackMessageId,
                                                          pInstance->ringBufferReadHandlePrivate,
@@ -431,7 +432,9 @@ static int32_t ubxMgaSendWaitAck(uGnssPrivateInstance_t *pInstance,
                             }
                         }
                     }
-                } while ((ackState == 0) && (uPortGetTickTimeMs() - startTimeMs < pInstance->timeoutMs));
+                } while ((ackState == 0) &&
+                         !uTimeoutExpiredMs(timeoutStart,
+                                            pInstance->timeoutMs));
                 if (ackState == 2) {
                     errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
                 } else if (ackState == 1) {
@@ -562,7 +565,7 @@ int32_t uGnssMgaOnlineRequestEncode(const uGnssMgaOnlineRequest_t *pRequest,
         errorCodeOrLength = (int32_t) U_ERROR_COMMON_NO_MEMORY;
         serverConfig.strServerToken = pRequest->pTokenStr;
         // This field is a direct mapping
-        serverConfig.dataTypeFlags = pRequest->dataTypeBitMap;
+        serverConfig.dataTypeFlags = (MGA_DATA_TYPE_FLAGS) pRequest->dataTypeBitMap;
         serverConfig.gnssTypeFlags = setGnssTypeFlags(pRequest->systemBitMap);
         serverConfig.useFlags |= MGA_FLAGS_USE_LATENCY | MGA_FLAGS_USE_TIMEACC;
         pMgaPosFilter = pRequest->pMgaPosFilter;
@@ -685,12 +688,13 @@ int32_t uGnssMgaIniTimeSend(uDeviceHandle_t gnssHandle,
                         }
                     }
                     message[3] = 0x80; // Leap seconds unknown
-                    *((uint16_t *) (message + 4)) = uUbxProtocolUint16Encode(structTm.tm_year + 1900); // Year
-                    message[6] = structTm.tm_mon + 1; // Month starting at 1
-                    message[7] = structTm.tm_mday; // Day starting at 1
-                    message[8] = structTm.tm_hour; // Hour
-                    message[9] = structTm.tm_min;  // Minute
-                    message[10] = structTm.tm_sec; // Seconds
+                    *((uint16_t *) (message + 4)) = uUbxProtocolUint16Encode((uint16_t) (structTm.tm_year +
+                                                                                         1900)); // Year
+                    message[6] = (char) (structTm.tm_mon + 1); // Month starting at 1
+                    message[7] = (char) structTm.tm_mday; // Day starting at 1
+                    message[8] = (char) structTm.tm_hour; // Hour
+                    message[9] = (char) structTm.tm_min;  // Minute
+                    message[10] = (char) structTm.tm_sec; // Seconds
                     // Nanoseconds
                     *((uint32_t *) (message + 12)) = uUbxProtocolUint32Encode((int32_t) (timeUtcNanoseconds %
                                                                                          1000000000LL));
@@ -967,8 +971,8 @@ bool uGnssMgaAutonomousIsOn(uDeviceHandle_t gnssHandle)
                 if (uGnssCfgPrivateValGetListAlloc(pInstance, &keyId, 1, &pCfgVal,
                                                    U_GNSS_CFG_VAL_LAYER_RAM) == 1) {
                     onNotOff = (bool) pCfgVal->value;
-                    uPortFree(pCfgVal);
                 }
+                uPortFree(pCfgVal);
             } else {
                 // Ye olde way: poll for the UBX-CFG-NAVX5 message
                 if (uGnssPrivateSendReceiveUbxMessage(pInstance,
@@ -1056,7 +1060,7 @@ int32_t uGnssMgaGetDatabase(uDeviceHandle_t gnssHandle,
     uGnssPrivateInstance_t *pInstance;
     int32_t protocolsOut = 0;
     int32_t readHandle;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     // The UBX-MGA message class/ID (to capture -DBD and -ACK)
     uGnssPrivateMessageId_t messageId = {.type = U_GNSS_PROTOCOL_UBX,
                                          .id.ubx = 0x1300 + U_GNSS_UBX_MESSAGE_ID_ALL
@@ -1098,9 +1102,10 @@ int32_t uGnssMgaGetDatabase(uDeviceHandle_t gnssHandle,
                     if (uGnssPrivateSendOnlyStreamUbxMessage(pInstance, 0x13, 0x80,
                                                              NULL, 0) == U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES) {
                         errorCodeOrLength = (int32_t) U_ERROR_COMMON_TIMEOUT;
-                        startTimeMs = uPortGetTickTimeMs();
+                        timeoutStart = uTimeoutStart();
                         while (context.keepGoing && (context.errorCodeOrLength >= 0) &&
-                               (uPortGetTickTimeMs() - startTimeMs < U_GNSS_MGA_DATABASE_READ_TIMEOUT_MS)) {
+                               !uTimeoutExpiredMs(timeoutStart,
+                                                  U_GNSS_MGA_DATABASE_READ_TIMEOUT_MS)) {
                             uPortTaskBlock(250);
                         }
                         if (!context.keepGoing) {

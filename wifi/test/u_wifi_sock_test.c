@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -457,7 +457,6 @@ U_PORT_TEST_FUNCTION("[wifiSock]", "wifiSockTCPTest")
         TEST_CHECK_TRUE(returnCode == 0);
     }
 
-
     //lint -esym(645, remoteAddress) 'remoteAddress' may not have been initialized
     uSockAddress_t remoteAddress;
     // Lookup the IP address for the host name
@@ -798,6 +797,5 @@ U_PORT_TEST_FUNCTION("[wifi]", "wifiSockCleanUp")
 }
 
 #endif // U_SHORT_RANGE_TEST_WIFI()
-
 
 // End of file

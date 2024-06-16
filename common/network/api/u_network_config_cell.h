@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,12 @@
  * irrespective of whether cellular is used there.
  */
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-network-cellular.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** The network configuration for cellular.
  */
 typedef struct {
@@ -80,11 +86,11 @@ typedef struct {
     const char *pUsername; /** ONLY REQUIRED if you must use a user name
                                and password with the APN provided to you
                                by your service provider; let your compiler
-                               initialised= this to zero otherwise. */
+                               initialise this to zero otherwise. */
     const char *pPassword; /** ONLY REQUIRED if you must use a user name
                                and password with the APN provided to you
                                by your service provider; let your compiler
-                               initialised= this to zero otherwise. */
+                               initialise this to zero otherwise. */
     int32_t authenticationMode; /** ONLY REQUIRED if you must give a user name
                                     and password with the APN provided to
                                     you by your service provider and your
@@ -93,9 +99,33 @@ typedef struct {
                                     there is no harm in populating this field
                                     even if your module _does_ support figuring
                                     out the authentication mode automatically. */
+    const char *pMccMnc; /** ONLY REQUIRED if you wish to connect to a specific
+                             MCC/MNC rather than to the best available network;
+                             should point to the null-terminated string giving
+                             the MCC and MNC of the PLMN to use (for example
+                             "23410").
+                             NOTE: Cannot be used if asyncConnect is set to true.*/
+    const uDeviceCfgUart_t *pUartPpp; /** ONLY REQUIRED if U_CFG_PPP_ENABLE is defined AND
+                                          you wish to run the PPP interface to the cellular
+                                          module over a DIFFERENT serial port to that which
+                                          is already in use.  This is useful if you are
+                                          using the USB interface of a cellular module,
+                                          which does not support the CMUX protocol that
+                                          is used to multiplex PPP with AT.  Otherwise,
+                                          please let your compiler initialise this to zero. */
+    bool asyncConnect; /** ONLY SET THIS to true if you wish uNetworkInterfaceUp() to return IMMEDIATELY,
+    before the cellular network connection has been established, allowing the
+    application to continue with other operations rather than waiting. */
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
     /* This is the end of version 0 of this
-       structure: should any fields be added to
-       this structure in future they must be
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
        added AFTER this point and instructions
        must be given against each one as to how
        to set the version field if any of the

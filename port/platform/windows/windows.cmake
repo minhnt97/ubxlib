@@ -12,7 +12,9 @@ endif()
 set(ENV{UBXLIB_BASE} ${UBXLIB_BASE})
 message("UBXLIB_BASE will be \"${UBXLIB_BASE}\"")
 
-if (NOT DEFINED UBXLIB_FEATURES)
+if (DEFINED ENV{UBXLIB_FEATURES})
+  separate_arguments(UBXLIB_FEATURES NATIVE_COMMAND $ENV{UBXLIB_FEATURES})
+elseif (NOT DEFINED UBXLIB_FEATURES)
   # All ubxlib features activated by default
   set(UBXLIB_FEATURES short_range cell gnss)
 endif()
@@ -23,7 +25,7 @@ if (MSVC)
     # C++20 standard (needed for designated initialisers)
     set(CMAKE_CXX_STANDARD 20)
     # Warnings as errors and ignore a few warnings
-    add_compile_options(/J /WX /wd4068 /wd4090 /wd4838 /wd4996 /wd4061 /wd4309 /wd5045)
+    add_compile_options(/J /WX /wd4068 /wd4090 /wd4838 /wd4996 /wd4061 /wd4309 /wd5045 /wd4200)
     # These warnings needs to be disable as well for 64-bit Windows for now
     add_compile_options(/wd4312 /wd4267 /wd4244 /wd4311 /wd4477)
     # Switch off warning about duplicate functions since we use WEAK which MSVC doesn't _need_ but then complains about there being two objects...
@@ -77,7 +79,7 @@ set(UBXLIB_SRC_PORT
     ${UBXLIB_BASE}/port/platform/${UBXLIB_PLATFORM}/src/u_port_uart.c
     ${UBXLIB_BASE}/port/platform/${UBXLIB_PLATFORM}/src/u_port_i2c.c
     ${UBXLIB_BASE}/port/platform/${UBXLIB_PLATFORM}/src/u_port_spi.c
-    ${UBXLIB_BASE}/port/platform/${UBXLIB_PLATFORM}/src/u_port_crypto.c
+    ${UBXLIB_BASE}/port/platform/${UBXLIB_PLATFORM}/src/u_port_named_pipe.c
     ${UBXLIB_BASE}/port/platform/${UBXLIB_PLATFORM}/src/u_port_private.c
     ${UBXLIB_BASE}/port/clib/u_port_clib_mktime64.c
     ${UBXLIB_BASE}/port/clib/u_port_clib_strtok_r.c
@@ -86,6 +88,6 @@ set(UBXLIB_SRC_PORT
 # Using the above, create the ubxlib library and add its headers.
 add_library(ubxlib ${UBXLIB_SRC} ${UBXLIB_SRC_PORT})
 message("UBXLIB_COMPILE_OPTIONS will be \"${UBXLIB_COMPILE_OPTIONS}\"")
-target_compile_options(ubxlib PRIVATE ${UBXLIB_COMPILE_OPTIONS})
+target_compile_options(ubxlib PUBLIC ${UBXLIB_COMPILE_OPTIONS})
 target_include_directories(ubxlib PUBLIC ${UBXLIB_INC} ${UBXLIB_PUBLIC_INC_PORT})
 target_include_directories(ubxlib PRIVATE ${UBXLIB_PRIVATE_INC} ${UBXLIB_PRIVATE_INC_PORT})

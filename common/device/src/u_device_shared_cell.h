@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,8 +46,9 @@ extern "C" {
 typedef struct {
     int32_t uart;
     uAtClientHandle_t at;
-    int64_t stopTimeMs;
+    uTimeoutStop_t timeoutStop;
     int32_t pinPwrOn;
+    uDeviceSerial_t *pPppDeviceSerial;
 } uDeviceCellContext_t;
 
 #ifdef __cplusplus

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,8 @@
 
 #include "u_test_util_resource_check.h"
 
+#include "u_timeout.h"
+
 #include "u_network.h"
 #include "u_network_test_shared_cfg.h"
 #include "u_http_client_test_shared_cfg.h"
@@ -73,13 +75,16 @@
 #include "u_http_client.h"
 #include "u_device_shared.h"
 
-// For uCellPwrReboot()
+// For uCellPwrReboot() and MUX
 #include "u_at_client.h"
 #include "u_cell_module_type.h"
 #include "u_cell.h"
 #include "u_cell_file.h"
 #include "u_cell_net.h"
 #include "u_cell_pwr.h"
+#ifdef U_CELL_TEST_MUX_ALWAYS
+#include "u_cell_mux.h"
+#endif
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -109,7 +114,7 @@
 #  define U_HTTP_CLIENT_TEST_DATA_SIZE_BYTES (1024 * 5)
 # define U_HTTP_CLIENT_TEST_DATA_SHORT_RANGE_SIZE_BYTES 2000
 # else
-#  define U_HTTP_CLIENT_TEST_DATA_SIZE_BYTES 512 // NRF52, which we use NRF5SDK on, doesn't have enough heap for large datasize
+#  define U_HTTP_CLIENT_TEST_DATA_SIZE_BYTES 512 // NRF52, which we use NRF5SDK on, doesn't have enough heap
 #  define U_HTTP_CLIENT_TEST_DATA_SHORT_RANGE_SIZE_BYTES 512
 # endif
 #endif
@@ -152,7 +157,7 @@
 #ifndef HTTP_CLIENT_TEST_MAX_TRIES_FLOW_CONTROL
 /** How many times to try a PUT/POST operation if the response
  * appears to be truncated and this may be because RTS flow
- * control is note wired to the module.
+ * control is not wired to the module.
  */
 # define HTTP_CLIENT_TEST_MAX_TRIES_FLOW_CONTROL 3
 #endif
@@ -170,6 +175,14 @@
 /** An overall guard limit for trying any given HTTP request type.
  */
 # define HTTP_CLIENT_TEST_OVERALL_TRIES_COUNT 30
+#endif
+
+#ifndef HTTP_CLIENT_TEST_CHUNK_LENGTH_BYTES
+/** The chunk length to use when testing with the chunked
+ * API: not just using the default since that would extend
+ * the test time unnecesarily.
+ */
+# define HTTP_CLIENT_TEST_CHUNK_LENGTH_BYTES 1024
 #endif
 
 /* ----------------------------------------------------------------
@@ -223,6 +236,32 @@ static size_t gSizeDataBufferIn = 0;
 /** A place to hook the buffer for content type.
  */
 static char *gpContentTypeBuffer = NULL;
+
+/** How much data we are exchanging in each HTTP transaction.
+ */
+static size_t gTestDataSizeBytes = 0;
+
+/** Keep track of whether we're testing chunked or not this time.
+ */
+static bool gChunkedApi = false;
+
+/** Offset into the output buffer for a chunked PUT/POST.
+ */
+static size_t gDataBufferOutOffset = 0;
+
+/** Offset into the input buffer for a chunked POST/GET.
+ */
+static size_t gDataBufferInOffset = 0;
+
+/** Keep track of whether the PUT/POST outgoing chunked
+ * data transfer ended correctly.
+ */
+static bool gDataCallbackCalledWithNull = false;
+
+/** Keep track of whether the POST/GET downlink data
+ * transfer ended correctly.
+ */
+static bool gResponseBodyCallbackCalledWithNull = false;
 
 /* ----------------------------------------------------------------
  * STATIC FUNCTIONS
@@ -280,6 +319,11 @@ static uNetworkTestList_t *pStdPreamble()
                               gpUNetworkTestDeviceTypeName[pTmp->pDeviceCfg->deviceType],
                               gpUNetworkTestTypeName[pTmp->networkType]);
             U_PORT_TEST_ASSERT(uDeviceOpen(pTmp->pDeviceCfg, pTmp->pDevHandle) == 0);
+#ifdef U_CELL_TEST_MUX_ALWAYS
+            if (pTmp->pDeviceCfg->deviceType == U_DEVICE_TYPE_CELL) {
+                U_PORT_TEST_ASSERT(uCellMuxEnable(*pTmp->pDevHandle) == 0);
+            }
+#endif
         }
     }
 
@@ -323,8 +367,61 @@ static void httpCallback(uDeviceHandle_t devHandle,
         pCallbackData->devHandle = devHandle;
         pCallbackData->statusCodeOrError = statusCodeOrError;
         pCallbackData->responseSize = responseSize;
-        U_TEST_PRINT_LINE("HTTP Callback - response size %d.\n", responseSize);
+        U_TEST_PRINT_LINE("HTTP callback, response size %d.\n", responseSize);
     }
+}
+
+// Data callback for chunked PUTs/POSTs (i.e. uplink).
+// pUserParam should point to gTestDataSizeBytes.
+static size_t dataCallback(uDeviceHandle_t devHandle,
+                           char *pData, size_t size,
+                           void *pUserParam)
+{
+    size_t testDataSizeBytes = *(size_t *) pUserParam;
+    size_t dataSize = size;
+
+    (void) devHandle;
+
+    if (pData != NULL) {
+        if (gDataBufferOutOffset + dataSize > testDataSizeBytes) {
+            dataSize = testDataSizeBytes - gDataBufferOutOffset;
+        }
+        memcpy(pData, gpDataBufferOut + gDataBufferOutOffset, dataSize);
+        gDataBufferOutOffset += dataSize;
+        U_PORT_TEST_ASSERT(gDataBufferOutOffset <= testDataSizeBytes);
+        U_PORT_TEST_ASSERT(!gDataCallbackCalledWithNull);
+    } else {
+        gDataCallbackCalledWithNull = true;
+    }
+
+    U_PORT_TEST_ASSERT((pData != NULL) || (size == 0));
+
+    return dataSize;
+}
+
+// Data callback for chunked POSTs/GETs (i.e. downlink).
+// pUserParam should point to gSizeDataBufferIn.
+static bool responseBodyCallback(uDeviceHandle_t devHandle,
+                                 const char *pResponseBody,
+                                 size_t size,
+                                 void *pUserParam)
+{
+    size_t sizeDataBufferIn = *(size_t *) pUserParam;
+
+    (void) devHandle;
+
+    if (pResponseBody != NULL) {
+        memcpy(gpDataBufferIn + gDataBufferInOffset, pResponseBody, size);
+        gDataBufferInOffset += size;
+        U_PORT_TEST_ASSERT(gDataBufferInOffset <= sizeDataBufferIn);
+        U_PORT_TEST_ASSERT(!gResponseBodyCallbackCalledWithNull);
+    } else {
+        gResponseBodyCallbackCalledWithNull = true;
+    }
+
+    U_PORT_TEST_ASSERT((pResponseBody != NULL) || (size == 0));
+
+    return true;
 }
 
 // Fill a buffer with binary 0 to 255.
@@ -389,10 +486,11 @@ static int32_t checkResponse(uHttpClientTestOperation_t operation,
                              size_t responseSizeBlocking,
                              const char *pContentTypeBuffer,
                              volatile uHttpClientTestCallback_t *pCallbackData,
-                             bool checkBinary, bool rtsFlowControlEnabled)
+                             bool checkBinary, bool rtsFlowControlEnabled,
+                             bool chunkedApi)
 {
     int32_t outcome = (int32_t) U_ERROR_COMMON_SUCCESS;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     int32_t x;
     const char *pTmp;
     int32_t y;
@@ -421,21 +519,21 @@ static int32_t checkResponse(uHttpClientTestOperation_t operation,
                 // For the non-blocking case, should have an initial
                 // error code of zero
                 if (errorOrStatusCode == 0) {
-                    startTimeMs = uPortGetTickTimeMs();
+                    timeoutStart = uTimeoutStart();
                     // Wait for twice as long as the timeout as a guard
                     U_TEST_PRINT_LINE("waiting for asynchronous response for up to"
                                       " %d second(s)...", (pConnection->timeoutSeconds * 2) +
                                       U_HTTP_CLIENT_TEST_RESPONSE_TIMEOUT_EXTRA_SECONDS);
                     while (!pCallbackData->called &&
-                           (uPortGetTickTimeMs() - startTimeMs < ((pConnection->timeoutSeconds * 2) +
-                                                                  U_HTTP_CLIENT_TEST_RESPONSE_TIMEOUT_EXTRA_SECONDS) * 1000)) {
+                           !uTimeoutExpiredSeconds(timeoutStart, (pConnection->timeoutSeconds * 2) +
+                                                   U_HTTP_CLIENT_TEST_RESPONSE_TIMEOUT_EXTRA_SECONDS)) {
                         uPortTaskBlock(100);
                     }
 
                     if (pCallbackData->called) {
                         responseSize = pCallbackData->responseSize;
-                        U_TEST_PRINT_LINE("response received in %d ms.\n",
-                                          uPortGetTickTimeMs() - startTimeMs);
+                        U_TEST_PRINT_LINE("response received in %u ms.\n",
+                                          uTimeoutElapsedMs(timeoutStart));
                         if (pCallbackData->statusCodeOrError != expectedStatusCode) {
                             U_TEST_PRINT_LINE("expected status code %d, got %d.\n",
                                               expectedStatusCode, pCallbackData->statusCodeOrError);
@@ -448,8 +546,8 @@ static int32_t checkResponse(uHttpClientTestOperation_t operation,
                             }
                         }
                     } else {
-                        U_TEST_PRINT_LINE("callback not called after %d second(s).\n",
-                                          (uPortGetTickTimeMs() - startTimeMs) / 1000);
+                        U_TEST_PRINT_LINE("callback not called after %u second(s).\n",
+                                          uTimeoutElapsedSeconds(timeoutStart));
                         outcome = (int32_t) U_ERROR_COMMON_TIMEOUT;
                     }
                 } else {
@@ -554,6 +652,23 @@ static int32_t checkResponse(uHttpClientTestOperation_t operation,
                     }
                 }
             }
+            if (chunkedApi) {
+                // Finally, check that the chunked API callbacks were called correctly
+                if (gDataCallbackCalledWithNull) {
+                    U_TEST_PRINT_LINE("dataCallback() was called with NULL",
+                                      " during a chunked PUT/POST.");
+                    outcome = (int32_t) U_ERROR_COMMON_BAD_DATA;
+                }
+                if (((operation == U_HTTP_CLIENT_TEST_OPERATION_POST) ||
+                     (operation == U_HTTP_CLIENT_TEST_OPERATION_GET_PUT) ||
+                     (operation == U_HTTP_CLIENT_TEST_OPERATION_GET_DELETED) ||
+                     (operation == U_HTTP_CLIENT_TEST_OPERATION_GET_POST)) &&
+                    !gResponseBodyCallbackCalledWithNull) {
+                    U_TEST_PRINT_LINE("responseBodyCallback() was not called with",
+                                      " NULL at the end of a chunked POST/GET.");
+                    outcome = (int32_t) U_ERROR_COMMON_BAD_DATA;
+                }
+            }
         }
     }
     // Reset the callback data for next time
@@ -583,7 +698,6 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
     int32_t port = U_HTTP_CLIENT_TEST_SERVER_PORT;
     char serialNumber[U_SECURITY_SERIAL_NUMBER_MAX_LENGTH_BYTES];
     size_t httpClientMaxNumConn = U_HTTP_CLIENT_TEST_MAX_NUM;
-    size_t uHttpClientTestDataSizeBytes;
     char pathBuffer[32];
     uHttpClientTestCallback_t callbackData = {0};
     int32_t errorOrStatusCode;
@@ -639,12 +753,12 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
         if ((deviceType == U_DEVICE_TYPE_SHORT_RANGE_OPEN_CPU) ||
             (deviceType == U_DEVICE_TYPE_SHORT_RANGE)) {
             httpClientMaxNumConn = U_HTTP_SHORT_RANGE_CLIENT_TEST_MAX_NUM;
-            uHttpClientTestDataSizeBytes = U_HTTP_CLIENT_TEST_DATA_SHORT_RANGE_SIZE_BYTES;
+            gTestDataSizeBytes = U_HTTP_CLIENT_TEST_DATA_SHORT_RANGE_SIZE_BYTES;
 #ifdef U_CFG_TEST_SHORT_RANGE_MODULE_TYPE
             uShortRangeAtClientHandleGet(devHandle, &atHandle);
 #endif
         } else {
-            uHttpClientTestDataSizeBytes = U_HTTP_CLIENT_TEST_DATA_SIZE_BYTES;
+            gTestDataSizeBytes = U_HTTP_CLIENT_TEST_DATA_SIZE_BYTES;
             uCellAtClientHandleGet(devHandle, &atHandle);
         }
         if (atHandle != NULL) {
@@ -669,6 +783,8 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                 break;
         }
 
+        connection.maxChunkLengthBytes = HTTP_CLIENT_TEST_CHUNK_LENGTH_BYTES;
+
         // Repeat for HTTP and HTTPS
         for (size_t x = 0; x < 2; x++) {
             if (x == 1) {
@@ -685,10 +801,12 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
 
             // Do this for as many times as we have HTTP/HTTPS instances, opening a new
             // one each time and alternating between blocking (with/without
-            // errorOnBusy) and non-blocking behaviours
+            // errorOnBusy) and non-blocking behaviours, also between chunked
+            // and non-chunked APIs, where supported
             for (size_t y = 0; y < httpClientMaxNumConn; y++) {
                 connection.pResponseCallback = NULL;
                 connection.pResponseCallbackParam = NULL;
+                gChunkedApi = false;
 
                 if (y % 2) {
                     // non-blocking
@@ -696,6 +814,14 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                     connection.pResponseCallbackParam = &callbackData;
                     // Flip between error on busy and not
                     connection.errorOnBusy = !connection.errorOnBusy;
+                }
+
+                if ((y % 3) && (deviceType == U_DEVICE_TYPE_CELL)) {
+                    // Chunked API
+                    gChunkedApi = true;
+                    // Use one less than the previous chunk length each time,
+                    // just to be awkward
+                    connection.maxChunkLengthBytes--;
                 }
 
                 uPortLog(U_TEST_PREFIX "opening HTTP%s client %d of %d on %s, %sblocking",
@@ -732,28 +858,49 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                         checkBinary = true;
                         do {
                             errorOrStatusCode = 0;
+                            gDataCallbackCalledWithNull = false;
+                            gResponseBodyCallbackCalledWithNull = false;
+                            gDataBufferOutOffset = 0;
+                            gDataBufferInOffset = 0;
                             switch (requestOperation) {
                                 case U_HTTP_CLIENT_TEST_OPERATION_PUT:
                                     // Fill the data buffer with data to PUT and PUT it
-                                    bufferFill(gpDataBufferOut, uHttpClientTestDataSizeBytes);
-                                    U_TEST_PRINT_LINE("PUT %d byte(s) to %s...",
-                                                      uHttpClientTestDataSizeBytes, pathBuffer);
-                                    errorOrStatusCode = uHttpClientPutRequest(gpHttpContext[y],
-                                                                              pathBuffer, gpDataBufferOut,
-                                                                              uHttpClientTestDataSizeBytes,
-                                                                              U_HTTP_CLIENT_TEST_CONTENT_TYPE);
+                                    bufferFill(gpDataBufferOut, gTestDataSizeBytes);
+                                    uPortLog(U_TEST_PREFIX "PUT %d byte(s) to %s", gTestDataSizeBytes, pathBuffer);
+                                    if (gChunkedApi) {
+                                        uPortLog(", chunked API...\n");
+                                        errorOrStatusCode = uHttpClientPutRequestChunked(gpHttpContext[y],
+                                                                                         pathBuffer, dataCallback,
+                                                                                         &gTestDataSizeBytes,
+                                                                                         U_HTTP_CLIENT_TEST_CONTENT_TYPE);
+                                    } else {
+                                        uPortLog("...\n");
+                                        errorOrStatusCode = uHttpClientPutRequest(gpHttpContext[y],
+                                                                                  pathBuffer, gpDataBufferOut,
+                                                                                  gTestDataSizeBytes,
+                                                                                  U_HTTP_CLIENT_TEST_CONTENT_TYPE);
+                                    }
                                     break;
                                 case U_HTTP_CLIENT_TEST_OPERATION_GET_PUT:
                                     // Fill the data buffer and the content-type buffer
                                     // with rubbish and GET the file again
-                                    memset(gpDataBufferIn, 0xFF, uHttpClientTestDataSizeBytes);
+                                    memset(gpDataBufferIn, 0xFF, gTestDataSizeBytes);
                                     memset(gpContentTypeBuffer, 0xFF, U_HTTP_CLIENT_CONTENT_TYPE_LENGTH_BYTES);
-                                    gSizeDataBufferIn = uHttpClientTestDataSizeBytes;
-                                    U_TEST_PRINT_LINE("GET of %s...", pathBuffer);
-                                    errorOrStatusCode = uHttpClientGetRequest(gpHttpContext[y],
-                                                                              pathBuffer, gpDataBufferIn,
-                                                                              &gSizeDataBufferIn,
-                                                                              gpContentTypeBuffer);
+                                    gSizeDataBufferIn = gTestDataSizeBytes;
+                                    uPortLog(U_TEST_PREFIX "GET of %s", pathBuffer);
+                                    if (gChunkedApi) {
+                                        uPortLog(", chunked API...\n");
+                                        errorOrStatusCode = uHttpClientGetRequestChunked(gpHttpContext[y],
+                                                                                         pathBuffer, responseBodyCallback,
+                                                                                         &gSizeDataBufferIn,
+                                                                                         gpContentTypeBuffer);
+                                    } else {
+                                        uPortLog("...\n");
+                                        errorOrStatusCode = uHttpClientGetRequest(gpHttpContext[y],
+                                                                                  pathBuffer, gpDataBufferIn,
+                                                                                  &gSizeDataBufferIn,
+                                                                                  gpContentTypeBuffer);
+                                    }
                                     break;
                                 case U_HTTP_CLIENT_TEST_OPERATION_DELETE_PUT:
                                     // DELETE it
@@ -762,41 +909,61 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                                     break;
                                 case U_HTTP_CLIENT_TEST_OPERATION_GET_DELETED:
                                     // Try to GET the deleted file
-                                    memset(gpDataBufferIn, 0xFF, uHttpClientTestDataSizeBytes);
+                                    memset(gpDataBufferIn, 0xFF, gTestDataSizeBytes);
                                     memset(gpContentTypeBuffer, 0xFF, U_HTTP_CLIENT_CONTENT_TYPE_LENGTH_BYTES);
-                                    gSizeDataBufferIn = uHttpClientTestDataSizeBytes;
-                                    U_TEST_PRINT_LINE("GET of deleted file %s...", pathBuffer);
-                                    errorOrStatusCode = uHttpClientGetRequest(gpHttpContext[y],
-                                                                              pathBuffer, gpDataBufferIn,
-                                                                              &gSizeDataBufferIn,
-                                                                              gpContentTypeBuffer);
+                                    gSizeDataBufferIn = gTestDataSizeBytes;
+                                    uPortLog(U_TEST_PREFIX "GET of deleted file %s", pathBuffer);
+                                    if (gChunkedApi) {
+                                        uPortLog(", chunked API...\n");
+                                        errorOrStatusCode = uHttpClientGetRequestChunked(gpHttpContext[y],
+                                                                                         pathBuffer, responseBodyCallback,
+                                                                                         &gSizeDataBufferIn,
+                                                                                         gpContentTypeBuffer);
+                                    } else {
+                                        uPortLog("...\n");
+                                        errorOrStatusCode = uHttpClientGetRequest(gpHttpContext[y],
+                                                                                  pathBuffer, gpDataBufferIn,
+                                                                                  &gSizeDataBufferIn,
+                                                                                  gpContentTypeBuffer);
+                                    }
                                     break;
                                 case U_HTTP_CLIENT_TEST_OPERATION_POST:
                                     // Fill the data buffer with data to POST and POST it
                                     if ((deviceType == U_DEVICE_TYPE_SHORT_RANGE_OPEN_CPU) ||
                                         (deviceType == U_DEVICE_TYPE_SHORT_RANGE)) {
-                                        bufferFillASCII(gpDataBufferOut, uHttpClientTestDataSizeBytes);
+                                        bufferFillASCII(gpDataBufferOut, gTestDataSizeBytes);
                                         checkBinary = false; // only printable ASCII supported for uconnectX POST
                                     } else {
-                                        bufferFill(gpDataBufferOut, uHttpClientTestDataSizeBytes);
+                                        bufferFill(gpDataBufferOut, gTestDataSizeBytes);
                                     }
-                                    memset(gpDataBufferIn, 0xFF, uHttpClientTestDataSizeBytes);
+                                    memset(gpDataBufferIn, 0xFF, gTestDataSizeBytes);
                                     memset(gpContentTypeBuffer, 0xFF, U_HTTP_CLIENT_CONTENT_TYPE_LENGTH_BYTES);
-                                    gSizeDataBufferIn = uHttpClientTestDataSizeBytes;
-                                    U_TEST_PRINT_LINE("POST %d byte(s) to %s...",
-                                                      uHttpClientTestDataSizeBytes, pathBuffer);
-                                    errorOrStatusCode = uHttpClientPostRequest(gpHttpContext[y],
-                                                                               pathBuffer, gpDataBufferOut,
-                                                                               uHttpClientTestDataSizeBytes,
-                                                                               U_HTTP_CLIENT_TEST_CONTENT_TYPE,
-                                                                               gpDataBufferIn,
-                                                                               &gSizeDataBufferIn,
-                                                                               gpContentTypeBuffer);
+                                    gSizeDataBufferIn = gTestDataSizeBytes;
+                                    uPortLog(U_TEST_PREFIX "POST %d byte(s) to %s", gTestDataSizeBytes, pathBuffer);
+                                    if (gChunkedApi) {
+                                        uPortLog(", chunked API...\n");
+                                        errorOrStatusCode = uHttpClientPostRequestChunked(gpHttpContext[y],
+                                                                                          pathBuffer, dataCallback,
+                                                                                          &gTestDataSizeBytes,
+                                                                                          U_HTTP_CLIENT_TEST_CONTENT_TYPE,
+                                                                                          responseBodyCallback,
+                                                                                          &gSizeDataBufferIn,
+                                                                                          gpContentTypeBuffer);
+                                    } else {
+                                        uPortLog("...\n");
+                                        errorOrStatusCode = uHttpClientPostRequest(gpHttpContext[y],
+                                                                                   pathBuffer, gpDataBufferOut,
+                                                                                   gTestDataSizeBytes,
+                                                                                   U_HTTP_CLIENT_TEST_CONTENT_TYPE,
+                                                                                   gpDataBufferIn,
+                                                                                   &gSizeDataBufferIn,
+                                                                                   gpContentTypeBuffer);
+                                    }
                                     break;
                                 case U_HTTP_CLIENT_TEST_OPERATION_HEAD:
                                     // Fill the data buffer with rubbish and get HEAD
-                                    memset(gpDataBufferIn, 0xFF, uHttpClientTestDataSizeBytes);
-                                    gSizeDataBufferIn = uHttpClientTestDataSizeBytes;
+                                    memset(gpDataBufferIn, 0xFF, gTestDataSizeBytes);
+                                    gSizeDataBufferIn = gTestDataSizeBytes;
                                     U_TEST_PRINT_LINE("HEAD of %s...", pathBuffer);
                                     errorOrStatusCode = uHttpClientHeadRequest(gpHttpContext[y],
                                                                                pathBuffer, gpDataBufferIn,
@@ -809,14 +976,23 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                                         (deviceType == U_DEVICE_TYPE_SHORT_RANGE)) {
                                         checkBinary = false;
                                     }
-                                    memset(gpDataBufferIn, 0xFF, uHttpClientTestDataSizeBytes);
+                                    memset(gpDataBufferIn, 0xFF, gTestDataSizeBytes);
                                     memset(gpContentTypeBuffer, 0xFF, U_HTTP_CLIENT_CONTENT_TYPE_LENGTH_BYTES);
-                                    gSizeDataBufferIn = uHttpClientTestDataSizeBytes;
-                                    U_TEST_PRINT_LINE("GET of %s...", pathBuffer);
-                                    errorOrStatusCode = uHttpClientGetRequest(gpHttpContext[y],
-                                                                              pathBuffer, gpDataBufferIn,
-                                                                              &gSizeDataBufferIn,
-                                                                              gpContentTypeBuffer);
+                                    gSizeDataBufferIn = gTestDataSizeBytes;
+                                    uPortLog(U_TEST_PREFIX "GET of %s", pathBuffer);
+                                    if (gChunkedApi) {
+                                        uPortLog(", chunked API...\n");
+                                        errorOrStatusCode = uHttpClientGetRequestChunked(gpHttpContext[y],
+                                                                                         pathBuffer, responseBodyCallback,
+                                                                                         &gSizeDataBufferIn,
+                                                                                         gpContentTypeBuffer);
+                                    } else {
+                                        uPortLog("...\n");
+                                        errorOrStatusCode = uHttpClientGetRequest(gpHttpContext[y],
+                                                                                  pathBuffer, gpDataBufferIn,
+                                                                                  &gSizeDataBufferIn,
+                                                                                  gpContentTypeBuffer);
+                                    }
                                     break;
                                 case U_HTTP_CLIENT_TEST_OPERATION_DELETE_POST:
                                     // Finally DELETE the file again
@@ -826,14 +1002,14 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                                 default:
                                     break;
                             }
-                            U_TEST_PRINT_LINE("Result %d\n", errorOrStatusCode);
+                            U_TEST_PRINT_LINE("result %d\n", errorOrStatusCode);
                             // Check whether it worked or not
                             outcome = checkResponse((uHttpClientTestOperation_t) requestOperation,
                                                     errorOrStatusCode, &connection,
-                                                    gpDataBufferIn, uHttpClientTestDataSizeBytes,
+                                                    gpDataBufferIn, gTestDataSizeBytes,
                                                     gSizeDataBufferIn, gpContentTypeBuffer,
                                                     (volatile uHttpClientTestCallback_t *) &callbackData,
-                                                    checkBinary, rtsFlowControlEnabled);
+                                                    checkBinary, rtsFlowControlEnabled, gChunkedApi);
                             if ((outcome == (int32_t) U_ERROR_COMMON_UNKNOWN) ||
                                 (outcome == (int32_t) U_ERROR_COMMON_DEVICE_ERROR)) {
                                 // U_ERROR_COMMON_UNKNOWN or U_ERROR_COMMON_DEVICE_ERROR is reported
@@ -877,6 +1053,7 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
                                                                                      networkStatusCallback, pTmp) == 0);
                                     }
                                     uHttpClientClose(gpHttpContext[y]);
+                                    gpHttpContext[y] = NULL;
                                     if (x == 0) {
                                         gpHttpContext[y] = pUHttpClientOpen(devHandle, &connection, NULL);
                                     } else {
@@ -909,6 +1086,7 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
             U_TEST_PRINT_LINE("closing HTTP instances...");
             for (size_t y = 0; y < httpClientMaxNumConn; y++) {
                 uHttpClientClose(gpHttpContext[y]);
+                gpHttpContext[y] = NULL;
             }
         } // for (HTTP and HTTPS)
     }
@@ -954,6 +1132,10 @@ U_PORT_TEST_FUNCTION("[httpClient]", "httpClient")
 U_PORT_TEST_FUNCTION("[httpClient]", "httpClientCleanUp")
 {
     U_TEST_PRINT_LINE("cleaning up any outstanding resources.\n");
+
+    for (size_t x = 0; x < sizeof(gpHttpContext) / sizeof(gpHttpContext[0]); x++) {
+        uHttpClientClose(gpHttpContext[x]);
+    }
 
     uPortFree(gpDataBufferOut);
     uPortFree(gpDataBufferIn);

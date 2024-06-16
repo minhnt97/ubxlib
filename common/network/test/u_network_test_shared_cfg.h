@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,12 @@ extern "C" {
  */
 #define U_NETWORK_TEST_TYPE_HAS_LOCATION(type) ((type == U_NETWORK_TYPE_CELL) || \
                                                 (type == U_NETWORK_TYPE_GNSS))
+
+#ifndef U_NETWORK_TEST_GNSS_BAUD_RATE
+/** The baud rate to use while testing GNSS operation with the device/network API.
+ */
+# define U_NETWORK_TEST_GNSS_BAUD_RATE 0
+#endif
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -259,6 +265,18 @@ bool uNetworkTestIsBle(uDeviceType_t deviceType,
 bool uNetworkTestHasStatusCallback(uDeviceType_t deviceType,
                                    uNetworkType_t networkType,
                                    int32_t moduleType);
+
+/** Return true if the combination supports a PPP connection.
+ *
+ * @param deviceType  the device type.
+ * @param networkType the network type.
+ * @param moduleType  the module type.
+ * @return            true if a PPP connection is supported,
+ *                    else false.
+ */
+bool uNetworkTestHasPpp(uDeviceType_t deviceType,
+                        uNetworkType_t networkType,
+                        int32_t moduleType);
 
 #endif // _U_NETWORK_TEST_CFG_H_
 

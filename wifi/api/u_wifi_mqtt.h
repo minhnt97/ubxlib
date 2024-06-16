@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,6 @@ extern "C" {
 /** The maximum number of connections that can be open at one time.
  */
 #define U_WIFI_MQTT_MAX_NUM_CONNECTIONS 7
-
 
 typedef enum {
     U_WIFI_MQTT_QOS_AT_MOST_ONCE = 0,
@@ -220,7 +219,6 @@ int32_t uWifiMqttMessageRead(const uMqttClientContext_t *pContext,
  * @return                    true/false.
  */
 bool uWifiMqttIsConnected(const uMqttClientContext_t *pContext);
-
 
 #ifdef __cplusplus
 }

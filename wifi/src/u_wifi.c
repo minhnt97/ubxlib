@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@
 #include "u_port_debug.h"
 #include "u_cfg_os_platform_specific.h"
 
+#include "u_timeout.h"
 #include "u_at_client.h"
 #include "u_short_range_module_type.h"
 #include "u_short_range.h"
@@ -1087,7 +1088,6 @@ int32_t uWifiStationScan(uDeviceHandle_t devHandle, const char *pSsid,
     } else {
         uShortRangeUnlock();
     }
-
 
     return errorCode;
 }

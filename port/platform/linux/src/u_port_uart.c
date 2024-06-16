@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,6 +72,7 @@
  * -------------------------------------------------------------- */
 
 typedef struct uPortUartData_t {
+    int32_t id;
     int uartFd;
     bool markedForDeletion;
     uPortTaskHandle_t rxTask;
@@ -148,16 +149,16 @@ static void eventHandler(void *pParam, size_t paramLength)
 static void readTask(void *pParam)
 {
     uPortUartData_t *p = (uPortUartData_t *)pParam;
-    struct timeval tv = {0};
-
-    // Initiate a set for select operation.
-    fd_set set;
-    tv.tv_usec = U_CFG_OS_YIELD_MS * 1000;
     // Need a brief pause before calling select after open.
     uPortTaskBlock(10);
     while (!p->markedForDeletion) {
+        // Initiate a set for select operation.
+        fd_set set;
         FD_ZERO(&set);
         FD_SET(p->uartFd, &set);
+        // Select timeout
+        struct timeval tv = {0};
+        tv.tv_usec = U_CFG_OS_YIELD_MS * 1000;
         // Wait for input
         int res = select(p->uartFd + 1, &set, NULL, NULL, &tv);
         if (res > 0) {
@@ -214,7 +215,7 @@ static void readTask(void *pParam)
     }
 }
 
-static uPortUartPrefix_t *findPrefix(pthread_t threadId)
+static uPortUartPrefix_t *pFindPrefix(pthread_t threadId)
 {
     uLinkedList_t *p = gpUartPrefixList;
     while (p != NULL) {
@@ -227,12 +228,25 @@ static uPortUartPrefix_t *findPrefix(pthread_t threadId)
     return NULL;
 }
 
-static uPortUartData_t *findUart(int32_t handle)
+static uPortUartData_t *pFindUart(int32_t handle)
 {
     uLinkedList_t *p = gpUartList;
     while (p != NULL) {
         uPortUartData_t *pUart = (uPortUartData_t *)(p->p);
         if (pUart->uartFd == handle) {
+            return pUart;
+        }
+        p = p->pNext;
+    }
+    return NULL;
+}
+
+static uPortUartData_t *pFindUartById(int32_t id)
+{
+    uLinkedList_t *p = gpUartList;
+    while (p != NULL) {
+        uPortUartData_t *pUart = (uPortUartData_t *)(p->p);
+        if (pUart->id == id) {
             return pUart;
         }
         p = p->pNext;
@@ -274,7 +288,7 @@ static uint32_t suspendResumeUartHwHandshake(int32_t handle, bool suspendNotResu
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
         errorCode = U_ERROR_COMMON_INVALID_PARAMETER;
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion) {
             errorCode = U_ERROR_COMMON_SUCCESS;
             struct termios options;
@@ -364,7 +378,7 @@ void uPortUartDeinit()
 int32_t uPortUartPrefix(const char *pPrefix)
 {
     uErrorCode_t errorCode = U_ERROR_COMMON_INVALID_PARAMETER;
-    if (pPrefix != NULL) {
+    if ((pPrefix != NULL) && (strlen(pPrefix) <= U_PORT_UART_MAX_PREFIX_LENGTH)) {
         errorCode = U_ERROR_COMMON_NO_MEMORY;
         uPortUartPrefix_t *pUartPrefix = pUPortMalloc(sizeof(uPortUartPrefix_t));
         if (pUartPrefix != NULL) {
@@ -372,7 +386,7 @@ int32_t uPortUartPrefix(const char *pPrefix)
             // Remove any existing prefixes for this thread ID
             pthread_t threadId = pthread_self();
             uPortUartPrefix_t *p;
-            while ((p = findPrefix(threadId)) != NULL) {
+            while ((p = pFindPrefix(threadId)) != NULL) {
                 uPortFree(p);
                 uLinkedListRemove(&gpUartPrefixList, p);
             }
@@ -402,12 +416,16 @@ int32_t uPortUartOpen(int32_t uart, int32_t baudRate,
     if (gMutex == NULL) {
         return U_ERROR_COMMON_NOT_INITIALISED;
     }
+    if ((uart >= 0) && (pFindUartById(uart) != NULL)) {
+        return (int32_t)U_ERROR_COMMON_BUSY;
+    }
     uPortUartData_t *pUartData = pUPortMalloc(sizeof(uPortUartData_t));
     if (pUartData == NULL) {
         return U_ERROR_COMMON_NO_MEMORY;
     }
     memset(pUartData, 0, sizeof(uPortUartData_t));
     pUartData->uartFd = -1;
+    pUartData->id = -1;
     pUartData->eventQueueHandle = -1;
     if ((pinTx >= 0) || (pinRx >= 0)) {
         FAIL(U_ERROR_COMMON_INVALID_PARAMETER);
@@ -435,7 +453,7 @@ int32_t uPortUartOpen(int32_t uart, int32_t baudRate,
     char prefix[U_PORT_UART_MAX_PREFIX_LENGTH + 1]; // +1 for terminator
     char portName[U_PORT_UART_MAX_PREFIX_LENGTH + 16]; // +16 for terminator and uart index
     U_PORT_MUTEX_LOCK(gMutex);
-    uPortUartPrefix_t *pUartPrefix = findPrefix(pthread_self());
+    uPortUartPrefix_t *pUartPrefix = pFindPrefix(pthread_self());
     if (pUartPrefix != NULL) {
         strncpy(prefix, pUartPrefix->str, sizeof(prefix));
     } else {
@@ -498,6 +516,7 @@ int32_t uPortUartOpen(int32_t uart, int32_t baudRate,
     uLinkedListAdd(&gpUartList, (void *)pUartData);
     U_PORT_MUTEX_UNLOCK(gMutex);
     U_ATOMIC_INCREMENT(&gResourceAllocCount);
+    pUartData->id = uart;
     return (int32_t)(pUartData->uartFd);
 }
 
@@ -506,7 +525,7 @@ void uPortUartClose(int32_t handle)
 {
     if (gMutex != NULL) {
 
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
 
         U_PORT_MUTEX_LOCK(gMutex);
 
@@ -531,7 +550,7 @@ int32_t uPortUartGetReceiveSize(int32_t handle)
     if (gMutex != NULL) {
         sizeOrErrorCode = (int32_t)U_ERROR_COMMON_INVALID_PARAMETER;
         U_PORT_MUTEX_LOCK(gMutex);
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion) {
             if (pUartData->bufferFull) {
                 sizeOrErrorCode = pUartData->bufferSize;
@@ -559,7 +578,7 @@ int32_t uPortUartRead(int32_t handle, void *pBuffer,
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
         sizeOrErrorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pBuffer != NULL) && (sizeBytes > 0) &&
             (pUartData != NULL) && !pUartData->markedForDeletion) {
             sizeOrErrorCode = 0;
@@ -610,7 +629,7 @@ int32_t uPortUartWrite(int32_t handle, const void *pBuffer,
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
         sizeOrErrorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pBuffer != NULL) && (sizeBytes > 0) &&
             (pUartData != NULL) && !pUartData->markedForDeletion) {
             sizeOrErrorCode = write(pUartData->uartFd, pBuffer, sizeBytes);
@@ -637,7 +656,7 @@ int32_t uPortUartEventCallbackSet(int32_t handle,
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
         errorCode = U_ERROR_COMMON_INVALID_PARAMETER;
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion &&
             (filter != 0) && (pFunction != NULL)) {
             // Open an event queue to eventHandler()
@@ -671,7 +690,7 @@ void uPortUartEventCallbackRemove(int32_t handle)
     int32_t eventQueueHandle = -1;
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion) {
             // Save the eventQueueHandle and set all
             // the parameters to indicate that the
@@ -699,7 +718,7 @@ uint32_t uPortUartEventCallbackFilterGet(int32_t handle)
     uint32_t filter = 0;
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion) {
             filter = pUartData->eventFilter;
         }
@@ -715,7 +734,7 @@ int32_t uPortUartEventCallbackFilterSet(int32_t handle,
     uErrorCode_t errorCode = U_ERROR_COMMON_NOT_INITIALISED;
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((filter != 0) && (pUartData != NULL) &&
             !pUartData->markedForDeletion) {
             pUartData->eventFilter = filter;
@@ -733,7 +752,7 @@ int32_t uPortUartEventSend(int32_t handle, uint32_t eventBitMap)
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
         errorCode = U_ERROR_COMMON_INVALID_PARAMETER;
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion &&
             (pUartData->eventQueueHandle >= 0) &&
             // The only event we support right now
@@ -769,7 +788,7 @@ bool uPortUartEventIsCallback(int32_t handle)
     bool isEventCallback = false;
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion &&
             (pUartData->eventQueueHandle >= 0)) {
             isEventCallback = uPortEventQueueIsTask(pUartData->eventQueueHandle);
@@ -786,7 +805,7 @@ int32_t uPortUartEventStackMinFree(int32_t handle)
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
         sizeOrErrorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion &&
             (pUartData->eventQueueHandle >= 0)) {
             sizeOrErrorCode = uPortEventQueueStackMinFree(pUartData->eventQueueHandle);
@@ -803,7 +822,7 @@ bool uPortUartIsRtsFlowControlEnabled(int32_t handle)
     bool rtsFlowControlIsEnabled = false;
     if (gMutex != NULL) {
         U_PORT_MUTEX_LOCK(gMutex);
-        uPortUartData_t *pUartData = findUart(handle);
+        uPortUartData_t *pUartData = pFindUart(handle);
         if ((pUartData != NULL) && !pUartData->markedForDeletion) {
             rtsFlowControlIsEnabled = pUartData->hwHandshake || pUartData->handshakeSuspended;
         }

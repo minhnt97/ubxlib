@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -144,7 +144,7 @@
 
 /** Make a UBX message type from a message class and message ID.
  */
-#define U_GNSS_UBX_MESSAGE(class, id) ((((uint16_t) (class)) << 8) | ((uint8_t) (id)))
+#define U_GNSS_UBX_MESSAGE(class, id) ((uint16_t) ((((uint16_t) (class)) << 8) | ((uint8_t) (id))))
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -179,6 +179,9 @@ typedef enum {
     U_GNSS_TRANSPORT_UART_2, /**< the transport handle should be a UART handle;
                                   use this if your GNSS chip has two UART ports
                                   and you are connected to the second one. */
+    U_GNSS_TRANSPORT_USB,    /**< the transport handle should STILL be a UART handle;
+                                  use this if your GNSS chip is connected via USB;
+                                  the UART driver will still be used. */
     U_GNSS_TRANSPORT_MAX_NUM,
     U_GNSS_TRANSPORT_UART_1 = U_GNSS_TRANSPORT_UART  /**< the transport handle should
                                                           be a UART handle; equivalent
@@ -195,7 +198,8 @@ typedef enum {
  */
 typedef union {
     void *pAt;      /**< for transport type #U_GNSS_TRANSPORT_AT. */
-    int32_t uart;   /**< for transport types #U_GNSS_TRANSPORT_UART, #U_GNSS_TRANSPORT_UART_1 and  #U_GNSS_TRANSPORT_UART_2). */
+    int32_t uart;   /**< for transport types #U_GNSS_TRANSPORT_UART, #U_GNSS_TRANSPORT_UART_1,
+                         #U_GNSS_TRANSPORT_UART_2 and #U_GNSS_TRANSPORT_USB. */
     int32_t i2c;    /**< for transport type #U_GNSS_TRANSPORT_I2C. */
     int32_t spi;    /**< for transport type #U_GNSS_TRANSPORT_SPI. */
     void *pDeviceSerial; /**< for transport type #U_GNSS_TRANSPORT_VIRTUAL_SERIAL. */
@@ -311,7 +315,6 @@ typedef enum {
     U_GNSS_TIME_SYSTEM_GALILEO = 4,
     U_GNSS_TIME_SYSTEM_NAVIC = 5
 } uGnssTimeSystem_t;
-
 
 /** The possible modes for RRLP capture; modes beyond
  * U_GNSS_RRLP_MODE_MEASX are only supported on M10 modules or later.

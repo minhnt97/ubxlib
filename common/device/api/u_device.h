@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 #include "u_device_serial.h"
 #include "u_common_spi.h"
+#include "u_device_handle.h"
 
 /** \addtogroup device Device
  *  @{
@@ -34,6 +35,13 @@
  * (chip or module). These functions are generally used in conjunction
  * with those in the network API, see u_network.h for further information.
  * These functions are thread-safe.
+ *
+ * IMPORTANT NOTE TO MAINTAINERS: the structures and enums here are
+ * also written in .yaml form over in the files
+ * /port/platform/zephyr/dts/bindings/u-blox,ubxlib-device*.yaml for use
+ * with the Zephyr platform.  If you change anything here you must
+ * change those file to match and you may also need to change the
+ * code in the Zephyr u_port_board_cfg.c file that parses the values.
  */
 
 #ifdef __cplusplus
@@ -47,11 +55,6 @@ extern "C" {
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
-
-/** The u-blox device handle; this is intended to be anonymous,
- * the contents should never be referenced by the application.
- */
-typedef void *uDeviceHandle_t;
 
 /** Device types.
  */
@@ -78,6 +81,19 @@ typedef enum {
                                            second one, otherwise please just use
                                            #U_DEVICE_TRANSPORT_TYPE_UART (or
                                            #U_DEVICE_TRANSPORT_TYPE_UART_1). */
+    U_DEVICE_TRANSPORT_TYPE_UART_USB, /**< Internally this is no different to
+                                           #U_DEVICE_TRANSPORT_TYPE_UART, despite
+                                           the HW being USB the UART driver is
+                                           still used in all cases and that works
+                                           on all supported platforms; IT SHOULD
+                                           BE USED in the GNSS case to indicate
+                                           that the connection is ultimately to
+                                           the USB port of the GNSS chip, rather
+                                           than the UART port of the GNSS chip
+                                           (this code needs to know that because
+                                           the configuration of periodic message
+                                           transmission from within the GNSS
+                                           device is port-specific). */
     U_DEVICE_TRANSPORT_TYPE_MAX_NUM,
     U_DEVICE_TRANSPORT_TYPE_UART_1 = U_DEVICE_TRANSPORT_TYPE_UART
 } uDeviceTransportType_t;
@@ -106,6 +122,12 @@ typedef int32_t uDeviceVersion_t;
  * know nothing about the network.
  */
 
+/* NOTE TO MAINTAINERS: if you change this structure you may
+ * need to change u-blox,ubxlib-device-xxx.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** UART transport configuration.
  */
 typedef struct {
@@ -114,17 +136,26 @@ typedef struct {
                                    unless otherwise specified below. */
     int32_t uart;             /**< The UART HW block to use; for Linux see
                                    also pPrefix. */
-    int32_t baudRate;         /**< UART speed value. */
+    int32_t baudRate;         /**< UART speed value; specify 0 to try the
+                                   possible baud rates and find the correct one. */
     int32_t pinTxd;           /**< The output pin that sends UART data to
-                                   the module. */
+                                   the module.  If you are using a platform
+                                   such as Zephyr, Linux or Windows, where the
+                                   pins are fixed by the application, then
+                                   use -1. */
     int32_t pinRxd;           /**< The input pin that receives UART data from
-                                   the module. */
+                                   the module. If you are using a platform
+                                   such as Zephyr, Linux or Windows, where the
+                                   pins are fixed by the application, then
+                                   use -1. */
     int32_t pinCts;           /**< The input pin that the module
                                    will use to indicate that data can be sent
-                                   to it; use -1 if there is no such connection. */
+                                   to it; use -1 if there is no such connection,
+                                   and always on Zephyr. */
     int32_t pinRts;           /**< The output pin output pin that tells the
                                    module that it can send more UART
-                                   data; use -1 if there is no such connection. */
+                                   data; use -1 if there is no such connection,
+                                   and always on Zephyr. */
     const char *pPrefix;      /**< Linux only: this will be prepended to uart,
                                    e.g. if pPrefix is "/dev/tty" and uart is 3
                                    then the UART is "/dev/tty3"; if NULL then
@@ -132,14 +163,22 @@ typedef struct {
                                    if uart is negative then pPrefix alone will
                                    be used, maximum length (strlen(pPrefix)) is
                                    #U_PORT_UART_MAX_PREFIX_LENGTH. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
-       against it might and with the clause"; if this
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
+       against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
 } uDeviceCfgUart_t;
@@ -151,18 +190,32 @@ typedef struct {
                                    compiler to initialise this to zero
                                    unless otherwise specified below. */
     uDeviceSerial_t *pDevice; /**< The virtual serial interface. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
-       against it might and with the clause"; if this
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
+       against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
 } uDeviceCfgVirtualSerial_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you may
+ * need to change u-blox,ubxlib-device-gnss.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** I2C transport configuration.
  */
 typedef struct {
@@ -170,8 +223,14 @@ typedef struct {
                                     compiler to initialise this to zero
                                     unless otherwise specified below. */
     int32_t i2c;               /**< The I2C HW block to use. */
-    int32_t pinSda;            /**< I2C data pin. */
-    int32_t pinScl;            /**< I2C clock pin. */
+    int32_t pinSda;            /**< I2C data pin;  If you are using a platform
+                                    such as Zephyr or Linux, where the I2C
+                                    pins are fixed by the application, then
+                                    use -1. */
+    int32_t pinScl;            /**< I2C clock pin;  If you are using a platform
+                                    such as Zephyr or Linux, where the I2C
+                                    pins are fixed by the application, then
+                                    use -1. */
     int32_t clockHertz;        /**< To use the default I2C clock frequency
                                     of #U_PORT_I2C_CLOCK_FREQUENCY_HERTZ
                                     then do NOT set this field, simply
@@ -187,18 +246,42 @@ typedef struct {
                                     the I2C HW configuration; if this is
                                     true then pinSda, pinScl and clockHertz
                                     will be ignored. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
+    size_t maxSegmentSize;     /**< The maximum size of I2C transfer to perform
+                                    at any one time; this is ONLY REQUIRED on a
+                                    very small number of chipsets that have a
+                                    HW limitation (e.g. nRF52832 which has a
+                                    maximum DMA size of 256 bytes); otherwise
+                                    it should be left at zero (meaning no
+                                    segmentation).  Where it is greater than
+                                    zero a transfer larger than this size
+                                    will be split into several transfers no
+                                    larger than this size. */
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
        against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
 } uDeviceCfgI2c_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you may
+ * need to change u-blox,ubxlib-device-gnss.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** SPI transport configuration.
  */
 typedef struct {
@@ -206,24 +289,58 @@ typedef struct {
                                               compiler to initialise this to zero
                                               unless otherwise specified below. */
     int32_t spi;                         /**< The SPI HW block to use. */
-    int32_t pinMosi;                     /**< The master-in, slave-out data pin. */
-    int32_t pinMiso;                     /**< The master-out, slave-in data pin. */
-    int32_t pinClk;                      /**< The clock pin. */
+    int32_t pinMosi;                     /**< The master-in, slave-out data pin;
+                                              if you are using a platform such as
+                                              Zephyr or Linux, where the SPI pins are
+                                              fixed by the application, then use -1. */
+    int32_t pinMiso;                     /**< The master-out, slave-in data pin;
+                                              if you are using a platform such as
+                                              Zephyr or Linux, where the SPI pins
+                                              are fixed by the application, then
+                                              use -1. */
+    int32_t pinClk;                      /**< The clock pin; if you are using a
+                                              platform such as Zephyr or Linux,
+                                              where the SPI pins are fixed by the
+                                              application, then use -1. */
     uCommonSpiControllerDevice_t device; /**< The device configuration. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
+    size_t maxSegmentSize;               /**< The maximum size of SPI transfer to
+                                              perform at any one time; this is ONLY
+                                              REQUIRED on a very small number of
+                                              chipsets that have a HW limitation
+                                              (e.g. nRF52832 which has a maximum DMA
+                                              size of 256 bytes); otherwise it should
+                                              be left at zero (meaning no segmentation).
+                                              Where it is greater than zero a transfer
+                                              larger than this size will be split into
+                                              several transfers no larger than this size. */
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
        against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
 } uDeviceCfgSpi_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-device-cellular.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** Cellular device configuration.
-*/
+ */
 typedef struct {
     uDeviceVersion_t version;  /**< Version of this structure; allow your
                                     compiler to initialise this to zero
@@ -246,18 +363,32 @@ typedef struct {
                                     pin to tell the module whether it can enter
                                     power-saving or not then put that pin number
                                     here, else set it to -1. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
        against it might end with the clause "; if this
-       field is populated then the version field
-       of this structure must be set to 1 or higher". */
+       field is populated then the version field of
+       this structure must be set to 1 or higher". */
 } uDeviceCfgCell_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-device-gnss.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** GNSS device configuration.
  */
 typedef struct {
@@ -296,18 +427,32 @@ typedef struct {
                                       the GNSS device is using is NOT the default
                                       #U_GNSS_I2C_ADDRESS; otherwise let the
                                       compiler initialise this to 0. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
        against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
 } uDeviceCfgGnss_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-device-short-range.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** Short-range device configuration.
  */
 typedef struct {
@@ -317,18 +462,32 @@ typedef struct {
     int32_t moduleType;       /**< The module type that is connected,
                                    see #uShortRangeModuleType_t in
                                    u_short_range_module_type.h. */
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t pinMagic were added, the comment
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
        against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
 } uDeviceCfgShortRange_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-device.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** The complete device configuration.
  */
 typedef struct {
@@ -348,13 +507,51 @@ typedef struct {
         uDeviceCfgSpi_t cfgSpi;
         uDeviceCfgVirtualSerial_t cfgVirtualSerial;
     } transportCfg;
-    /* This is the end of version 0 of this structure:
-       should any fields be added to this structure in
-       future they must be added AFTER this point and
-       instructions must be given against each one
-       as to how to set the version field if any of
-       the new fields are populated. For example,
-       if int32_t magic were added, the comment
+    const char *pCfgName; /**< A name for the configuration, only currently
+                               used by Zephyr to permit population of this
+                               structure from the device tree, in which
+                               case all of the other parameters in this
+                               structure may be overridden by a device
+                               tree node with this name; MUST point to
+                               a true constant string (the contents will
+                               not be copied by this code).  Otherwise,
+                               allow your compiler to initalise this
+                               to zero and it will be ignored.
+                               Zephyr users please consult
+                               /port/platform/zephyr/README.md for
+                               instructions on how to use the device
+                               tree to configure your ubxlib devices.
+                               NOTE TO ZEPHYR USERS: you only need to
+                               populate this field if you wish to use the
+                               device tree as your configuration source
+                               and you have more than one device of any
+                               given type in your device tree (e.g. two
+                               GNSS modules); otherwise you may leave
+                               it as NULL and the single device of any
+                               given device you happen to have in your
+                               device tree will be adopted.  You do,
+                               however, need to populate the
+                               deviceType member here if you have more
+                               than one ubxlib device in your device tree.
+                               IMPORTANT NOTE TO ZEPHYR USERS: if you get
+                               pCfgName wrong this will NOT throw an error,
+                               since pCfgName may be used for other
+                               purposes in future; you need to get it right. */
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
+    /* This is the end of version 0 of this
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
+       added AFTER this point and instructions
+       must be given against each one as to how
+       to set the version field if any of the
+       new fields are populated. For example, if
+       int32_t magic were added, the comment
        against it might end with the clause "; if this
        field is populated then the version field of
        this structure must be set to 1 or higher". */
@@ -400,7 +597,12 @@ int32_t uDeviceGetDefaults(uDeviceType_t deviceType,
 /** Open a device instance; if this function returns successfully
  * the device is powered-up and ready to be configured.
  *
- * @param[in] pDeviceCfg      device configuration, cannot be NULL.
+ * @param[in] pDeviceCfg      device configuration, should not be
+ *                            NULL unless you are using Zephyr and
+ *                            have provided a device configuration
+ *                            through the Zephyr device tree;
+ *                            see /port/platform/zephyr/README.md
+ *                            for instructions on how to do that.
  * @param[out] pDeviceHandle  a place to put the device handle;
  *                            cannot be NULL.
  * @return                    zero on success else a negative error

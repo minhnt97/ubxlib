@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,8 @@
 #include "u_cfg_sw.h"
 #include "u_port_debug.h"
 #include "u_cfg_os_platform_specific.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -1519,7 +1521,6 @@ int32_t uWifiSockReceiveFrom(uDeviceHandle_t devHandle,
     return errnoLocal;
 }
 
-
 int32_t uWifiSockRegisterCallbackData(uDeviceHandle_t devHandle,
                                       int32_t sockHandle,
                                       uWifiSockCallback_t pCallback)
@@ -1646,7 +1647,6 @@ int32_t uWifiSockGetHostByName(uDeviceHandle_t devHandle,
     return errnoLocal;
 }
 
-
 int32_t uWifiSockGetLocalAddress(uDeviceHandle_t devHandle,
                                  int32_t sockHandle,
                                  uSockAddress_t *pLocalAddress)
@@ -1758,7 +1758,7 @@ int32_t uWifiSockAccept(uDeviceHandle_t devHandle,
         return -U_SOCK_EBADFD;
     }
     uWifiSockSocket_t *pServerSock = &(gSockets[sockHandle]);
-    int32_t startTimeMs = uPortGetTickTimeMs();
+    uTimeoutStart_t timeoutStart = uTimeoutStart();
     while (true) {
         uShortRangeLock();
         uWifiSockSocket_t *pClientSock = pFindClientSocketByPort(devHandle, pServerSock->localPort);
@@ -1767,8 +1767,8 @@ int32_t uWifiSockAccept(uDeviceHandle_t devHandle,
             *pRemoteAddress = pClientSock->remoteAddress;
             return pClientSock->sockHandle;
         } else if (gUWifiSocketAcceptTimeoutS >= 0) {
-            if ((uPortGetTickTimeMs() - startTimeMs) / 1000 >
-                gUWifiSocketAcceptTimeoutS) {
+            if (uTimeoutExpiredSeconds(timeoutStart,
+                                       gUWifiSocketAcceptTimeoutS)) {
                 return U_ERROR_COMMON_TIMEOUT;
             }
         }

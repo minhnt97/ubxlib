@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@
 #include "string.h"    // strlen() and strcmp()
 #include "stdio.h"     // snprintf()
 #include "time.h"      // time_t and struct tm
+
 #include "u_compiler.h"
 
 #include "u_cfg_sw.h"
@@ -67,16 +68,22 @@
 #if (U_CFG_APP_GNSS_I2C >= 0) || (U_CFG_APP_GNSS_SPI >= 0)
 # include "u_ubx_protocol.h"
 #endif
-#include "u_port_crypto.h"
 #include "u_port_event_queue.h"
 #include "u_error_common.h"
+
+#include "u_timeout.h"
 
 #include "u_assert.h"
 
 #include "u_test_util_resource_check.h"
 
-#ifdef CONFIG_IRQ_OFFLOAD
-# include <irq_offload.h> // To test semaphore from ISR in zephyr
+#ifdef CONFIG_IRQ_OFFLOAD // To test semaphore from ISR in zephyr
+#include <version.h>
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/irq_offload.h>
+#else
+#include <irq_offload.h>
+#endif
 #endif
 
 /* ----------------------------------------------------------------
@@ -403,7 +410,7 @@ static const char gUartTestData[] =  "_____0000:01234567890123456789012345678901
 // U_CFG_TEST_UART_BUFFER_LENGTH_BYTES
 // so that the buffers go "around the corner"
 static char gUartBuffer[(U_CFG_TEST_UART_BUFFER_LENGTH_BYTES / 2) +
-                                                                  (U_CFG_TEST_UART_BUFFER_LENGTH_BYTES / 4)];
+                        (U_CFG_TEST_UART_BUFFER_LENGTH_BYTES / 4)];
 
 #endif // (U_CFG_TEST_UART_A >= 0) && (U_CFG_TEST_UART_B < 0)
 
@@ -447,64 +454,6 @@ static uPortTestTimeData_t timeTestData[] = {
     {{0,  0, 0,  1, 0, 137,  4,   0, 0}, 2114380800LL},
     {{0,  0, 0,  1, 0, 150,  4,   0, 0}, 2524608000LL}
 };
-
-/** SHA256 test vector, input, RC4.55 from:
- * https://www.dlitz.net/crypto/shad256-test-vectors/
- */
-static char const gSha256Input[] =
-    "\xde\x18\x89\x41\xa3\x37\x5d\x3a\x8a\x06\x1e\x67\x57\x6e\x92\x6d"
-    "\xc7\x1a\x7f\xa3\xf0\xcc\xeb\x97\x45\x2b\x4d\x32\x27\x96\x5f\x9e"
-    "\xa8\xcc\x75\x07\x6d\x9f\xb9\xc5\x41\x7a\xa5\xcb\x30\xfc\x22\x19"
-    "\x8b\x34\x98\x2d\xbb\x62\x9e";
-
-/** SHA256 test vector, output, RC4.55 from:
- * https://www.dlitz.net/crypto/shad256-test-vectors/
- */
-static const char gSha256Output[] =
-    "\x03\x80\x51\xe9\xc3\x24\x39\x3b\xd1\xca\x19\x78\xdd\x09\x52\xc2"
-    "\xaa\x37\x42\xca\x4f\x1b\xd5\xcd\x46\x11\xce\xa8\x38\x92\xd3\x82";
-
-/** HMAC SHA256 test vector, key, test 1 from:
- * https://tools.ietf.org/html/rfc4231#page-3
- */
-static const char gHmacSha256Key[] =
-    "\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b\x0b"
-    "\x0b\x0b\x0b\x0b";
-
-/** HMAC SHA256 test vector, input data, test 1 from:
- * https://tools.ietf.org/html/rfc4231#page-3
- */
-static const char gHmacSha256Input[] = "\x48\x69\x20\x54\x68\x65\x72\x65";
-
-/** HMAC SHA256 test vector, output data, test 1 from:
- * https://tools.ietf.org/html/rfc4231#page-3
- */
-static const char gHmacSha256Output[] =
-    "\xb0\x34\x4c\x61\xd8\xdb\x38\x53\x5c\xa8\xaf\xce\xaf\x0b\xf1\x2b"
-    "\x88\x1d\xc2\x00\xc9\x83\x3d\xa7\x26\xe9\x37\x6c\x2e\x32\xcf\xf7";
-
-/** AES CBC 128 test vector, key, test 1 from:
- * https://tools.ietf.org/html/rfc3602#page-6
- */
-static const char gAes128CbcKey[] =
-    "\x06\xa9\x21\x40\x36\xb8\xa1\x5b\x51\x2e\x03\xd5\x34\x12\x00\x06";
-
-/** AES CBC 128 test vector, initial vector, test 1 from:
- * https://tools.ietf.org/html/rfc3602#page-6
- */
-static const char gAes128CbcIV[] =
-    "\x3d\xaf\xba\x42\x9d\x9e\xb4\x30\xb4\x22\xda\x80\x2c\x9f\xac\x41";
-
-/** AES CBC 128 test vector, clear text, test 1 from:
- * https://tools.ietf.org/html/rfc3602#page-6
- */
-static const char gAes128CbcClear[] = "Single block msg";
-
-/** AES CBC 128 test vector, encrypted text, test 1 from:
- * https://tools.ietf.org/html/rfc3602#page-6
- */
-static const char gAes128CbcEncrypted[] =
-    "\xe3\x53\x77\x9c\x10\x79\xae\xb8\x27\x08\x94\x2d\xbe\x77\x18\x1a";
 
 /** Timer parameter value array; must have the same number of
  * entries as gTimerHandle.
@@ -1565,7 +1514,7 @@ U_PORT_TEST_FUNCTION("[port]", "portOs")
     U_PORT_TEST_ASSERT(errorCode == 0);
     U_PORT_TEST_ASSERT(gTaskHandle != NULL);
 
-    U_TEST_PRINT_LINE("time now %d ms.", (int32_t) uPortGetTickTimeMs());
+    U_TEST_PRINT_LINE("time now %d ms.", uPortGetTickTimeMs());
     uPortTaskBlock(200);
     U_TEST_PRINT_LINE("unlocking mutex, allowing task to execute.");
     U_PORT_TEST_ASSERT(uPortMutexUnlock(gMutexHandle) == 0);;
@@ -1656,7 +1605,7 @@ U_PORT_TEST_FUNCTION("[port]", "portOs")
 
     timeNowMs = uPortGetTickTimeMs() - startTimeMs;
     U_TEST_PRINT_LINE("according to uPortGetTickTimeMs()"
-                      " the test took %d ms.", (int32_t) timeNowMs);
+                      " the test took %d ms.", timeNowMs);
 #ifdef U_PORT_TEST_CHECK_TIME_TAKEN
     U_PORT_TEST_ASSERT((timeNowMs > 0) &&
                        (timeNowMs < U_PORT_TEST_OS_GUARD_DURATION_MS));
@@ -1846,7 +1795,7 @@ U_PORT_TEST_FUNCTION("[port]", "portOsSemaphore")
 
     timeNowMs = uPortGetTickTimeMs() - startTimeTestMs;
     U_TEST_PRINT_LINE("according to uPortGetTickTimeMs() the test took %d ms.",
-                      (int32_t) timeNowMs);
+                      timeNowMs);
 #ifdef U_PORT_TEST_CHECK_TIME_TAKEN
     U_PORT_TEST_ASSERT((timeNowMs > 0) &&
                        (timeNowMs < U_PORT_TEST_OS_GUARD_DURATION_MS));
@@ -1896,8 +1845,7 @@ U_PORT_TEST_FUNCTION("[port]", "portOsExtended")
     uPortTaskBlock(U_PORT_TEST_OS_BLOCK_TIME_MS);
     timeDelta = uPortGetTickTimeMs() - timeNowMs;
     U_TEST_PRINT_LINE("uPortTaskBlock(%d) blocked for %d ms.",
-                      U_PORT_TEST_OS_BLOCK_TIME_MS,
-                      (int32_t) (timeDelta));
+                      U_PORT_TEST_OS_BLOCK_TIME_MS, timeDelta);
     U_PORT_TEST_ASSERT((timeDelta >= U_PORT_TEST_OS_BLOCK_TIME_MS -
                         U_PORT_TEST_OS_BLOCK_TIME_TOLERANCE_MS) &&
                        (timeDelta <= U_PORT_TEST_OS_BLOCK_TIME_MS +
@@ -1926,8 +1874,7 @@ U_PORT_TEST_FUNCTION("[port]", "portOsExtended")
     uPortTaskBlock(U_PORT_TEST_OS_BLOCK_TIME_MS);
     timeDelta = uPortGetTickTimeMs() - timeNowMs;
     U_TEST_PRINT_LINE("uPortTaskBlock(%d) blocked for %d ms.",
-                      U_PORT_TEST_OS_BLOCK_TIME_MS,
-                      (int32_t) (timeDelta));
+                      U_PORT_TEST_OS_BLOCK_TIME_MS, timeDelta);
     U_PORT_TEST_ASSERT((timeDelta >= U_PORT_TEST_OS_BLOCK_TIME_MS -
                         U_PORT_TEST_OS_BLOCK_TIME_TOLERANCE_MS) &&
                        (timeDelta <= U_PORT_TEST_OS_BLOCK_TIME_MS +
@@ -1941,8 +1888,7 @@ U_PORT_TEST_FUNCTION("[port]", "portOsExtended")
     uPortTaskBlock(U_PORT_TEST_OS_BLOCK_TIME_MS);
     timeDelta = uPortGetTickTimeMs() - timeNowMs;
     U_TEST_PRINT_LINE("uPortTaskBlock(%d) blocked for %d ms.",
-                      U_PORT_TEST_OS_BLOCK_TIME_MS,
-                      (int32_t) (timeDelta));
+                      U_PORT_TEST_OS_BLOCK_TIME_MS, timeDelta);
     U_PORT_TEST_ASSERT((timeDelta >= U_PORT_TEST_OS_BLOCK_TIME_MS -
                         U_PORT_TEST_OS_BLOCK_TIME_TOLERANCE_MS) &&
                        (timeDelta <= U_PORT_TEST_OS_BLOCK_TIME_MS +
@@ -2600,6 +2546,7 @@ U_PORT_TEST_FUNCTION("[port]", "portUartRequiresSpecificWiring")
     // port so deinitialise it here to obtain the
     // correct initial heap size
     uPortDeinit();
+
     resourceCount = uTestUtilGetDynamicResourceCount();
     U_PORT_TEST_ASSERT(uPortInit() == 0);
 
@@ -2794,34 +2741,35 @@ U_PORT_TEST_FUNCTION("[port]", "portI2cRequiresSpecificWiring")
             *gpI2cBuffer = 0xFF;
             // First talk to an I2C address that is not present
             U_TEST_PRINT_LINE("deliberately using an invalid address (0x%02x).", U_PORT_TEST_I2C_ADDRESS - 1);
-            U_PORT_TEST_ASSERT(uPortI2cControllerSend(gI2cHandle, U_PORT_TEST_I2C_ADDRESS - 1, NULL, 0,
-                                                      false) < 0);
-            U_PORT_TEST_ASSERT(uPortI2cControllerSendReceive(gI2cHandle, U_PORT_TEST_I2C_ADDRESS - 1,
-                                                             gpI2cBuffer, 1, NULL, 0) < 0);
+            U_PORT_TEST_ASSERT(uPortI2cControllerExchange(gI2cHandle, U_PORT_TEST_I2C_ADDRESS - 1,
+                                                          gpI2cBuffer, 1, NULL, 0, false) < 0);
 
-            // The following should do nothing and return success
-            U_PORT_TEST_ASSERT(uPortI2cControllerSendReceive(gI2cHandle, U_PORT_TEST_I2C_ADDRESS - 1,
-                                                             NULL, 0, NULL, 0) == 0);
             U_TEST_PRINT_LINE("now using the valid address (0x%02x).", U_PORT_TEST_I2C_ADDRESS);
 # if !defined(U_CFG_TEST_USING_NRF5SDK) && !defined(__ZEPHYR__)
             // Now do a NULL send which will succeed only if the GNSS device is there;
             // note that the NRFX drivers used on NRF52 and NRF53 don't support sending
             // only the address, data must follow
-            U_PORT_TEST_ASSERT(uPortI2cControllerSend(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, NULL, 0,
-                                                      false) == 0);
+            U_PORT_TEST_ASSERT(uPortI2cControllerExchange(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, NULL, 0,
+                                                          NULL, 0, false) == 0);
 # endif
 
             // Write to the REGSTREAM address on the GNSS device
-            U_PORT_TEST_ASSERT(uPortI2cControllerSend(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, gpI2cBuffer, 1,
-                                                      false) == 0);
+            U_PORT_TEST_ASSERT(uPortI2cControllerExchange(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, gpI2cBuffer, 1,
+                                                          NULL, 0, false) == 0);
             // Write a longer thing; UBX-MON-VER polls the GNSS device for a
             // 40 + n·* 30 byte UBX-MON-VER response containing a 40 byte fixed part, which
             // is all we captue here; message class 0x0a, message ID 0x04.
+
+# if defined(U_CFG_APP_I2C_MAX_SEGMENT_SIZE) && (U_CFG_APP_I2C_MAX_SEGMENT_SIZE > 0)
+            // Where required, do this with segmentation on
+            U_PORT_TEST_ASSERT(uPortI2cSetMaxSegmentSize(gI2cHandle, U_CFG_APP_I2C_MAX_SEGMENT_SIZE) == 0);
+            U_PORT_TEST_ASSERT(uPortI2cGetMaxSegmentSize(gI2cHandle) == U_CFG_APP_I2C_MAX_SEGMENT_SIZE);
+# endif
             memset(gpI2cBuffer, 0xFF, U_PORT_TEST_I2C_BUFFER_LENGTH_BYTES);
             y = uUbxProtocolEncode(0x0a, 0x04, NULL, 0, gpI2cBuffer);
             // Send
-            U_PORT_TEST_ASSERT(uPortI2cControllerSend(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, gpI2cBuffer, y,
-                                                      false) == 0);
+            U_PORT_TEST_ASSERT(uPortI2cControllerExchange(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, gpI2cBuffer, y,
+                                                          NULL, 0, false) == 0);
             // Wait for the GNSS chip to sort itself out
             uPortTaskBlock(100);
             // There should now be a 40 + n * 30 byte UBX-MON-VER message waiting for us.  The number of
@@ -2830,10 +2778,8 @@ U_PORT_TEST_FUNCTION("[port]", "portI2cRequiresSpecificWiring")
             // 0xFD, with no stop bit, and then a read request for two bytes should get us the
             // [big-endian] length
             *gpI2cBuffer = 0xFD;
-            U_PORT_TEST_ASSERT(uPortI2cControllerSend(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, gpI2cBuffer, 1,
-                                                      true) == 0);
-            U_PORT_TEST_ASSERT(uPortI2cControllerSendReceive(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, NULL, 0,
-                                                             gpI2cBuffer, 2) == 2);
+            U_PORT_TEST_ASSERT(uPortI2cControllerExchange(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, gpI2cBuffer, 1,
+                                                          gpI2cBuffer, 2, true) == 2);
             y = (int32_t) ((((uint32_t) * gpI2cBuffer) << 8) + (uint32_t) * (gpI2cBuffer + 1));
             U_TEST_PRINT_LINE("read of number of bytes waiting returned 0x%02x%02x (%d).", *gpI2cBuffer,
                               *(gpI2cBuffer + 1), y);
@@ -2844,8 +2790,8 @@ U_PORT_TEST_FUNCTION("[port]", "portI2cRequiresSpecificWiring")
                     y = U_PORT_TEST_I2C_BUFFER_LENGTH_BYTES;
                 }
                 memset(gpI2cBuffer, 0xFF, U_PORT_TEST_I2C_BUFFER_LENGTH_BYTES);
-                z = uPortI2cControllerSendReceive(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, NULL, 0,
-                                                  gpI2cBuffer, y);
+                z = uPortI2cControllerExchange(gI2cHandle, U_PORT_TEST_I2C_ADDRESS, NULL, 0,
+                                               gpI2cBuffer, y, false);
                 U_TEST_PRINT_LINE("%d byte(s) retrieved.", z);
                 U_PORT_TEST_ASSERT(z >= y);
                 y = uUbxProtocolDecode(gpI2cBuffer, z, &messageClass, &messageId,
@@ -3013,6 +2959,12 @@ U_PORT_TEST_FUNCTION("[port]", "portSpiRequiresSpecificWiring")
     } else {
         memcpy(buffer3, buffer2, 3);
     }
+# if defined(U_CFG_APP_SPI_MAX_SEGMENT_SIZE) && (U_CFG_APP_SPI_MAX_SEGMENT_SIZE > 0)
+    // Where required, do this with segmentation on
+    U_PORT_TEST_ASSERT(uPortSpiSetMaxSegmentSize(gSpiHandle, U_CFG_APP_SPI_MAX_SEGMENT_SIZE) == 0);
+    U_PORT_TEST_ASSERT(uPortSpiGetMaxSegmentSize(gSpiHandle) == U_CFG_APP_SPI_MAX_SEGMENT_SIZE);
+# endif
+
     uPortSpiControllerSendReceiveWord(gSpiHandle, *((uint64_t *) &buffer3), 3);
     U_PORT_TEST_ASSERT(uPortSpiControllerSendReceiveBlock(gSpiHandle,
                                                           &(buffer2[3]),
@@ -3085,96 +3037,13 @@ U_PORT_TEST_FUNCTION("[port]", "portSpiRequiresSpecificWiring")
 }
 #endif
 
-/** Test crypto: not a rigorous test, more a "hello world".
- */
-U_PORT_TEST_FUNCTION("[port]", "portCrypto")
-{
-    char buffer[64];
-    char iv[U_PORT_CRYPTO_AES128_INITIALISATION_VECTOR_LENGTH_BYTES];
-    int32_t resourceCount;
-    int32_t x;
-
-    // Whatever called us likely initialised the
-    // port so deinitialise it here to obtain the
-    // correct initial heap size
-    uPortDeinit();
-
-    memset(buffer, 0, sizeof(buffer));
-
-    resourceCount = uTestUtilGetDynamicResourceCount();
-    U_PORT_TEST_ASSERT(uPortInit() == 0);
-
-    U_TEST_PRINT_LINE("testing SHA256...");
-    x = uPortCryptoSha256(gSha256Input,
-                          sizeof(gSha256Input) - 1,
-                          buffer);
-    if (x != (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
-        U_PORT_TEST_ASSERT(x == (int32_t) U_ERROR_COMMON_SUCCESS);
-        U_PORT_TEST_ASSERT(memcmp(buffer, gSha256Output,
-                                  U_PORT_CRYPTO_SHA256_OUTPUT_LENGTH_BYTES) == 0);
-    } else {
-        U_TEST_PRINT_LINE("SHA256 not supported.");
-    }
-
-    U_TEST_PRINT_LINE("testing HMAC SHA256...");
-    x = uPortCryptoHmacSha256(gHmacSha256Key,
-                              sizeof(gHmacSha256Key) - 1,
-                              gHmacSha256Input,
-                              sizeof(gHmacSha256Input) - 1,
-                              buffer);
-    if (x != (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
-        U_PORT_TEST_ASSERT(x == (int32_t) U_ERROR_COMMON_SUCCESS);
-        U_PORT_TEST_ASSERT(memcmp(buffer, gHmacSha256Output,
-                                  U_PORT_CRYPTO_SHA256_OUTPUT_LENGTH_BYTES) == 0);
-    } else {
-        U_TEST_PRINT_LINE("HMAC SHA256 not supported.");
-    }
-
-    U_TEST_PRINT_LINE("testing AES CBC 128...");
-    memcpy(iv, gAes128CbcIV, sizeof(iv));
-    x = uPortCryptoAes128CbcEncrypt(gAes128CbcKey,
-                                    sizeof(gAes128CbcKey) - 1,
-                                    iv, gAes128CbcClear,
-                                    sizeof(gAes128CbcClear) - 1,
-                                    buffer);
-    if (x != (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
-        U_PORT_TEST_ASSERT(x == (int32_t) U_ERROR_COMMON_SUCCESS);
-        U_PORT_TEST_ASSERT(memcmp(buffer, gAes128CbcEncrypted,
-                                  sizeof(gAes128CbcEncrypted) - 1) == 0);
-    } else {
-        U_TEST_PRINT_LINE("AES CBC 128 encryption not supported.");
-    }
-
-    memcpy(iv, gAes128CbcIV, sizeof(iv));
-    x = uPortCryptoAes128CbcDecrypt(gAes128CbcKey,
-                                    sizeof(gAes128CbcKey) - 1,
-                                    iv, gAes128CbcEncrypted,
-                                    sizeof(gAes128CbcEncrypted) - 1,
-                                    buffer);
-    if (x != (int32_t) U_ERROR_COMMON_NOT_SUPPORTED) {
-        U_PORT_TEST_ASSERT(x == (int32_t) U_ERROR_COMMON_SUCCESS);
-        U_PORT_TEST_ASSERT(memcmp(buffer, gAes128CbcClear,
-                                  sizeof(gAes128CbcClear) - 1) == 0);
-    } else {
-        U_TEST_PRINT_LINE("AES CBC 128 decryption not supported.");
-    }
-
-    uPortDeinit();
-
-    // Check for resource leaks
-    uTestUtilResourceCheck(U_TEST_PREFIX, NULL, true);
-    resourceCount = uTestUtilGetDynamicResourceCount() - resourceCount;
-    U_TEST_PRINT_LINE("we have leaked %d resources(s).", resourceCount);
-    U_PORT_TEST_ASSERT(resourceCount <= 0);
-}
-
 /** Test timers.
  */
 U_PORT_TEST_FUNCTION("[port]", "portTimers")
 {
     int32_t resourceCount;
     int32_t y;
-    int64_t startTime;
+    uTimeoutStart_t timeoutStart;
 
     // Whatever called us likely initialised the
     // port so deinitialise it here to obtain the
@@ -3233,9 +3102,9 @@ U_PORT_TEST_FUNCTION("[port]", "portTimers")
         // one-shot timer expires
         // Note: this test deliberately allows for slop in the actual timer
         // values however their relative values should still be correct
-        startTime = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         while ((gTimerParameterValue[2] == 0) &&
-               (uPortGetTickTimeMs() - startTime < 10000)) {
+               !uTimeoutExpiredSeconds(timeoutStart, 10)) {
             uPortTaskBlock(100);
         }
         U_PORT_TEST_ASSERT((gTimerParameterValue[2] == 1) && (gTimerParameterValue[3] == 3));
@@ -3251,9 +3120,9 @@ U_PORT_TEST_FUNCTION("[port]", "portTimers")
         U_PORT_TEST_ASSERT(uPortTimerStart(gTimerHandle[3]) == 0);
         U_PORT_TEST_ASSERT(uPortTimerStart(gTimerHandle[3]) == 0);
         // Wait for the periodic timer to expire one more time
-        startTime = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         while ((gTimerParameterValue[3] < 4) &&
-               (uPortGetTickTimeMs() - startTime < 5000)) {
+               !uTimeoutExpiredSeconds(timeoutStart, 5)) {
             uPortTaskBlock(100);
         }
         U_PORT_TEST_ASSERT(gTimerParameterValue[3] == 4);
@@ -3305,7 +3174,7 @@ U_PORT_TEST_FUNCTION("[port]", "portCriticalSection")
     int32_t errorCode;
     int32_t resourceCount;
     uint32_t y;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     int32_t errorFlag = 0x00;
 
     // Whatever called us likely initialised the
@@ -3341,8 +3210,8 @@ U_PORT_TEST_FUNCTION("[port]", "portCriticalSection")
     U_PORT_TEST_ASSERT(gVariable > 0);
 
     // Start the critical section
-    startTimeMs = uPortGetTickTimeMs();
-    (void)startTimeMs; // Suppress value not being read (it is for Windows)
+    timeoutStart = uTimeoutStart();
+    (void) timeoutStart; // Suppress value not being read (it is for Windows)
     errorCode = uPortEnterCritical();
     // Note: don't assert inside here as we don't want to leave this test
     // with the critical section active, instead just set errorFlag to indicate
@@ -3362,8 +3231,8 @@ U_PORT_TEST_FUNCTION("[port]", "portCriticalSection")
         // long time to _prove_ that the critical section has worked
         //lint -e{441, 550} Suppress loop variable not used in 2nd part of for()
         for (size_t x = 0; (gVariable == y) &&
-             (uPortGetTickTimeMs() - startTimeMs <
-              U_PORT_TEST_CRITICAL_SECTION_TEST_WAIT_TIME_MS); x++) {
+             !uTimeoutExpiredMs(timeoutStart,
+                                U_PORT_TEST_CRITICAL_SECTION_TEST_WAIT_TIME_MS); x++) {
             uPortTaskBlock(100);
         }
 #endif
@@ -3379,11 +3248,11 @@ U_PORT_TEST_FUNCTION("[port]", "portCriticalSection")
         U_PORT_TEST_ASSERT(errorFlag == 0);
 
         // gVariable should start changing again
-        startTimeMs = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         //lint -e{441, 550} Suppress loop variable not used in 2nd part of for()
         for (size_t x = 0; (gVariable == y) &&
-             (uPortGetTickTimeMs() - startTimeMs <
-              U_PORT_TEST_CRITICAL_SECTION_TEST_WAIT_TIME_MS); x++) {
+             !uTimeoutExpiredMs(timeoutStart,
+                                U_PORT_TEST_CRITICAL_SECTION_TEST_WAIT_TIME_MS); x++) {
             uPortTaskBlock(10);
         }
         U_PORT_TEST_ASSERT(gVariable != y);
@@ -3441,9 +3310,16 @@ U_PORT_TEST_FUNCTION("[port]", "portCleanUp")
 
     uPortDeinit();
 
-    U_PORT_TEST_ASSERT(uTestUtilResourceCheck(U_TEST_PREFIX,
-                                              U_TEST_UTIL_RESOURCE_CHECK_ERROR_MARKER,
-                                              true));
+    if (!uTestUtilResourceCheck(U_TEST_PREFIX,
+                                U_TEST_UTIL_RESOURCE_CHECK_ERROR_MARKER,
+                                true)) {
+        U_TEST_PRINT_LINE("too many resources outstanding.");
+        // We do not assert if the number of failed tests is non-zero; this
+        // is because clean-up is inevitably skpped when a test failure
+        // occurs and so bleating about resources only adds more
+        // needless noise: of _course_ there will be leaked resources!
+        U_PORT_TEST_ASSERT(uTestUtilGetNumFailed() != 0);
+    }
 }
 
 // End of file

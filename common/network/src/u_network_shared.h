@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,6 +66,14 @@ uDeviceHandle_t uNetworkGetDeviceHandle(uDeviceHandle_t devHandle,
  */
 uDeviceNetworkData_t *pUNetworkGetNetworkData(uDeviceInstance_t *pInstance,
                                               uNetworkType_t netType);
+
+/** Free any network configuration data stored with a device;
+ * It is advisable to only call this between a
+ * uDeviceLock()/uDeviceUnlock() pair.
+ *
+ * @param devHandle  the handle of the device.
+ */
+void uNetworkCfgFree(uDeviceHandle_t devHandle);
 
 #ifdef __cplusplus
 }

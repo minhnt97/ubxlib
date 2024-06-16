@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,7 +64,6 @@ extern "C" {
  */
 # define U_SHORT_RANGE_UART_BAUD_RATE 115200
 #endif
-
 
 /** Bluetooth address length.
  */
@@ -330,8 +329,25 @@ int32_t uShortRangeSetMqttConnectionStatusCallback(uDeviceHandle_t devHandle,
 int32_t uShortRangeAtClientHandleGet(uDeviceHandle_t devHandle,
                                      uAtClientHandle_t *pAtHandle);
 
-
 const uShortRangeModuleInfo_t *uShortRangeGetModuleInfo(int32_t moduleId);
+
+/** Get the firmware version string from the short-range module.
+ *
+ * @param devHandle   the short range device handle.
+ * @param[out] pStr   a pointer to size bytes of storage into which
+ *                    the firmware version string will be copied.
+ *                    Room should be allowed for a null terminator,
+ *                    which will be added to terminate the string.
+ *                    This pointer cannot be NULL.
+ * @param size        the number of bytes available at pStr, including
+ *                    room for a null terminator. Must be greater
+ *                    than zero.
+ * @return            on success, the number of characters copied into
+ *                    pStr NOT including the terminator (as strlen()
+ *                    would return), on failure negative error code.
+ */
+int32_t uShortRangeGetFirmwareVersionStr(uDeviceHandle_t devHandle,
+                                         char *pStr, size_t size);
 
 /** Check if a module type supports BLE
  *
@@ -421,10 +437,20 @@ int32_t uShortRangeGpioConfig(uDeviceHandle_t devHandle, int32_t gpioId, bool is
  */
 int32_t uShortRangeGpioSet(uDeviceHandle_t devHandle, int32_t gpioId, int32_t level);
 
-/** Resets the module settings to default values of a shortrange module.
+/** Resets the module settings to default values of a short-range module.
  *
  * @param pinResetToDefaults the pin of this MCU that MUST BE CONNECTED TO
- *                           the DSR pin of the module.
+ *                           the DSR pin of the module.  Note: the AT manual
+ *                           says that the module will be looking for the
+ *                           reset sequence on the "DTR line", but the
+ *                           "DTR line", the output from this MCU, which may
+ *                           be on this MCU's DTR pin, is conventionally
+ *                           connected to the DSR _pin_ of the short-range
+ *                           module; all very confusing.  To be clear:
+ *
+ *                           THIS IS THE MCU PIN THAT IS CONNECTED TO THE
+ *                           **DSR** PIN OF THE SHORT-RANGE MODULE.
+ *
  * @return                   zero on success else negative error code.
  */
 int32_t uShortRangeResetToDefaultSettings(int32_t pinResetToDefaults);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,10 +37,10 @@ extern "C" {
 
 /** Get the current BLE role for the connected module
  *
- * @param atHandle    the handle of the AT client to use.
+ * @param devHandle   the handle of the device.
  * @return            a uBleCfgRole_t value, on failure negative error code.
  */
-int32_t uBlePrivateGetRole(const uAtClientHandle_t atHandle);
+int32_t uBlePrivateGetRole(uDeviceHandle_t devHandle);
 
 #ifdef __cplusplus
 }

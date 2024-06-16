@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,8 @@
 #include "u_port_uart.h"
 #include "u_port_i2c.h"
 #include "u_port_spi.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h" // Required by u_gnss_private.h
 
@@ -224,7 +226,6 @@ static int32_t setPowerState(uDeviceHandle_t gnssHandle, uDeviceHandle_t cellHan
     return errorCode;
 }
 
-
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
@@ -349,9 +350,11 @@ size_t uGnssTestPrivateTransportTypesSet(uGnssTransportType_t *pTransportTypes,
             numEntries++;
         }
         if (numEntries == 0) {
+#ifndef U_CFG_TEST_GNSS_TRANSPORT_AT_DISABLE
             *pTransportTypes = U_GNSS_TRANSPORT_AT;
             pTransportTypes++;
             numEntries++;
+#endif
 #if U_CFG_APP_PIN_CELL_PWR_ON >= 0
             // TODO: temporarily omit testing of GNSS on virtual
             // serial if there is no way to power-cycle the
@@ -452,6 +455,10 @@ int32_t uGnssTestPrivatePreamble(uGnssModuleType_t moduleType,
                         // (see https://www.st.com/resource/en/errata_sheet/es0206-stm32f427437-and-stm32f429439-line-limitations-stmicroelectronics.pdf),
                         // switch to 400 kHz for our testing
                         uPortI2cSetClock(pParameters->streamHandle, 400000);
+# if defined(U_CFG_APP_I2C_MAX_SEGMENT_SIZE) && (U_CFG_APP_I2C_MAX_SEGMENT_SIZE > 0)
+                        uPortI2cSetMaxSegmentSize(pParameters->streamHandle,
+                                                  U_CFG_APP_I2C_MAX_SEGMENT_SIZE);
+# endif
                     }
                 }
                 break;
@@ -467,6 +474,10 @@ int32_t uGnssTestPrivatePreamble(uGnssModuleType_t moduleType,
                                              true);
                     if ((errorCode >= 0) &&
                         (uPortSpiControllerSetDevice(errorCode, &spiDevice) == 0)) {
+# if defined(U_CFG_APP_SPI_MAX_SEGMENT_SIZE) && (U_CFG_APP_SPI_MAX_SEGMENT_SIZE > 0)
+                        uPortSpiSetMaxSegmentSize(errorCode,
+                                                  U_CFG_APP_SPI_MAX_SEGMENT_SIZE);
+# endif
                         pParameters->streamHandle = errorCode;
                         transportHandle.spi = pParameters->streamHandle;
                     }
@@ -551,8 +562,7 @@ int32_t uGnssTestPrivatePreamble(uGnssModuleType_t moduleType,
                                      U_CFG_APP_PIN_GNSS_ENABLE_POWER, false,
                                      &pParameters->gnssHandle);
                 if (errorCode == 0) {
-                    if ((pParameters->cellHandle != NULL) &&
-                        (transportType == U_GNSS_TRANSPORT_VIRTUAL_SERIAL)) {
+                    if (pParameters->cellHandle != NULL) {
                         errorCode = uGnssSetIntermediate(pParameters->gnssHandle,
                                                          pParameters->cellHandle);
                     }

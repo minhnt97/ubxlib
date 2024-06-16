@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,12 @@ extern "C" {
  * TYPES
  * -------------------------------------------------------------- */
 
+/* NOTE TO MAINTAINERS: if you change this enum you will need to
+ * change u-blox,ubxlib-network-ble.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you will also
+ * need to update the table in the Zephyr u_port_board_cfg.c file
+ * that maps string to enum.
+ */
 typedef enum {
     U_BLE_CFG_ROLE_DISABLED = 0, /**< BLE disabled. */
     U_BLE_CFG_ROLE_CENTRAL, /**< central only mode. */

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,14 +24,16 @@
  * @brief Tests for the cellular MUX API.
  * These test should pass on all platforms that have a cellular module
  * connected to them.  They are only compiled if U_CFG_TEST_CELL_MODULE_TYPE
- * is defined and can be disabled with U_CFG_TEST_DISABLE_MUX.
+ * is defined and can be disabled with U_CFG_TEST_DISABLE_MUX, however
+ * they are also disabled if U_CFG_PPP_ENABLE is defined since stopping
+ * the mux while PPP is using it upsets just about everyone.
  *
  * IMPORTANT: see notes in u_cfg_test_platform_specific.h for the
  * naming rules that must be followed when using the
  * U_PORT_TEST_FUNCTION() macro.
  */
 
-#if defined(U_CFG_TEST_CELL_MODULE_TYPE) && !defined(U_CFG_TEST_DISABLE_MUX)
+#if defined(U_CFG_TEST_CELL_MODULE_TYPE) && !defined(U_CFG_TEST_DISABLE_MUX) && !defined(U_CFG_PPP_ENABLE)
 
 # ifdef U_CFG_OVERRIDE
 #  include "u_cfg_override.h" // For a customer's configuration override
@@ -61,6 +63,8 @@
 #include "u_port_debug.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -166,7 +170,7 @@ typedef struct {
 
 /** Used for keepGoingCallback() timeout.
  */
-static int32_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Handles.
  */
@@ -224,7 +228,8 @@ static bool keepGoingCallback(uDeviceHandle_t unused)
 
     (void) unused;
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -246,8 +251,8 @@ static void printBuffer(const char *pBuffer, size_t length)
 // Make a cellular connection
 static int32_t connect(uDeviceHandle_t cellHandle)
 {
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     return uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
                            U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -359,8 +364,9 @@ static void httpCallback(uDeviceHandle_t cellHandle, int32_t httpHandle,
     pCallbackData->httpHandle = httpHandle;
     pCallbackData->requestType = requestType;
     pCallbackData->error = error;
+    memset(pCallbackData->fileNameResponse, 0, sizeof(pCallbackData->fileNameResponse));
     strncpy(pCallbackData->fileNameResponse, pFileNameResponse,
-            sizeof(pCallbackData->fileNameResponse));
+            sizeof(pCallbackData->fileNameResponse) - 1);
     pCallbackData->contentsMismatch = !checkFile(cellHandle,
                                                  pFileNameResponse,
                                                  pCallbackData->pExpectedFirstLine,
@@ -369,18 +375,18 @@ static void httpCallback(uDeviceHandle_t cellHandle, int32_t httpHandle,
 }
 
 // Check an HTTP response, return true if it is good, else false.
-static bool httpWaitCheckResponse(int32_t timeoutSeconds,
+static bool httpWaitCheckResponse(uint32_t timeoutSeconds,
                                   volatile uCellMuxHttpTestCallback_t *pCallbackData,
                                   uDeviceHandle_t cellHandle, int32_t httpHandle,
                                   uCellHttpRequest_t requestType,
                                   const char *pFileNameResponse)
 {
     bool isOk = false;
-    int32_t startTimeMs = uPortGetTickTimeMs();
+    uTimeoutStart_t timeoutStart = uTimeoutStart();
 
-    U_TEST_PRINT_LINE("waiting up to %d second(s) for response to HTTP request...",
+    U_TEST_PRINT_LINE("waiting up to %u second(s) for response to HTTP request...",
                       timeoutSeconds);
-    while ((uPortGetTickTimeMs() - startTimeMs < (timeoutSeconds * 1000)) &&
+    while (!uTimeoutExpiredSeconds(timeoutStart, timeoutSeconds) &&
            !pCallbackData->called) {
         uPortTaskBlock(100);
     }
@@ -388,8 +394,8 @@ static bool httpWaitCheckResponse(int32_t timeoutSeconds,
     if (pCallbackData->called) {
         isOk = true;
         // The callback was called, check everything
-        U_TEST_PRINT_LINE("response received after %d millisecond(s).",
-                          uPortGetTickTimeMs() - startTimeMs);
+        U_TEST_PRINT_LINE("response received after %u millisecond(s).",
+                          uTimeoutElapsedMs(timeoutStart));
         if (pCallbackData->cellHandle != cellHandle) {
             U_TEST_PRINT_LINE("expected cell handle 0x%08x, got 0x%08x.",
                               cellHandle, pCallbackData->cellHandle);
@@ -425,8 +431,8 @@ static bool httpWaitCheckResponse(int32_t timeoutSeconds,
             isOk = false;
         }
     } else {
-        U_TEST_PRINT_LINE("callback not called after %d second(s).",
-                          (uPortGetTickTimeMs() - startTimeMs) / 1000);
+        U_TEST_PRINT_LINE("callback not called after %u second(s).",
+                          uTimeoutElapsedSeconds(timeoutStart));
     }
 
     // Reset for next time
@@ -450,6 +456,7 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxBasic")
     uDeviceHandle_t cellHandle;
     const uCellPrivateModule_t *pModule;
     int32_t resourceCount;
+    bool uartSleepWasEnabled;
     // +1 and zero init so that we can treat it as a string
     char buffer1[U_CELL_INFO_IMEI_SIZE + 1] = {0};
     char buffer2[U_CELL_INFO_IMEI_SIZE + 1] = {0};
@@ -478,6 +485,11 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxBasic")
         U_PORT_TEST_ASSERT(uCellInfoGetImei(cellHandle, buffer1) == 0);
         U_TEST_PRINT_LINE("IMEI is %s.", buffer1);
 
+        // Disable UART sleep as CMUX won't work reliably with it on
+        uartSleepWasEnabled = uCellPwrUartSleepIsEnabled(cellHandle);
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrDisableUartSleep(cellHandle) == 0);
+        }
         for (size_t x = 0; x < U_CELL_MUX_TEST_BASIC_NUM_ITERATIONS; x++) {
 
             uPortLog(U_TEST_PREFIX_BASE "_%d: enabling CMUX...\n", x + 1);
@@ -500,6 +512,9 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxBasic")
             U_PORT_TEST_ASSERT(uCellInfoGetImei(cellHandle, buffer2) == 0);
             uPortLog(U_TEST_PREFIX_BASE "_%d: IMEI read after disabling CMUX gives %s.\n", x + 1, buffer2);
             U_PORT_TEST_ASSERT(strncmp(buffer1, buffer2, sizeof(buffer1)) == 0);
+        }
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrEnableUartSleep(cellHandle) == 0);
         }
     } else {
         U_TEST_PRINT_LINE("CMUX is not supported, not running tests.");
@@ -533,6 +548,7 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxSock")
     int32_t z;
     size_t count;
     char *pBuffer;
+    bool uartSleepWasEnabled;
 
     // In case a previous test failed
     uCellTestPrivateCleanup(&gHandles);
@@ -554,6 +570,11 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxSock")
     // for pModule from now on
 
     if (U_CELL_PRIVATE_HAS(pModule, U_CELL_PRIVATE_FEATURE_CMUX)) {
+        // Disable UART sleep as CMUX won't work reliably with it on
+        uartSleepWasEnabled = uCellPwrUartSleepIsEnabled(cellHandle);
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrDisableUartSleep(cellHandle) == 0);
+        }
         // Malloc a buffer to receive things into.
         pBuffer = (char *) pUPortMalloc(U_CELL_SOCK_MAX_SEGMENT_SIZE_BYTES);
         U_PORT_TEST_ASSERT(pBuffer != NULL);
@@ -671,6 +692,10 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxSock")
 
         // Free memory
         uPortFree(pBuffer);
+
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrEnableUartSleep(cellHandle) == 0);
+        }
     } else {
         U_TEST_PRINT_LINE("CMUX is not supported, not running tests.");
         U_PORT_TEST_ASSERT(uCellMuxEnable(cellHandle) < 0);
@@ -702,9 +727,10 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxMqtt")
     char topic[U_CELL_INFO_IMEI_SIZE + 1] = {0};
     char *pMessageIn;
     char *pTopicStrIn;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     size_t messageSize = sizeof(gMqttSendData) - 1;
     uCellMqttQos_t qos;
+    bool uartSleepWasEnabled;
 
     // In case a previous test failed
     uCellTestPrivateCleanup(&gHandles);
@@ -727,6 +753,12 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxMqtt")
 
     if (U_CELL_PRIVATE_HAS(pModule, U_CELL_PRIVATE_FEATURE_CMUX) &&
         uCellMqttIsSupported(cellHandle)) {
+
+        // Disable UART sleep as CMUX won't work reliably with it on
+        uartSleepWasEnabled = uCellPwrUartSleepIsEnabled(cellHandle);
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrDisableUartSleep(cellHandle) == 0);
+        }
 
         // Get some memory to put a received MQTT message/topic in
         pMessageIn = (char *) pUPortMalloc(messageSize);
@@ -774,7 +806,7 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxMqtt")
                                               U_CELL_MQTT_QOS_AT_MOST_ONCE) == 0);
 
         U_TEST_PRINT_LINE("publishing \"%s\" to topic \"%s\"...", gMqttSendData, topic);
-        startTimeMs = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         gMqttMessagesAvailable = 0;
         U_PORT_TEST_ASSERT(uCellMqttPublish(cellHandle, topic, gMqttSendData,
                                             sizeof(gMqttSendData) - 1,
@@ -784,7 +816,8 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxMqtt")
         U_TEST_PRINT_LINE("waiting %d second(s) for message to be sent back...",
                           U_CELL_MUX_TEST_MQTT_RESPONSE_TIMEOUT_MS);
         while ((gMqttMessagesAvailable == 0) &&
-               (uPortGetTickTimeMs() - startTimeMs < U_CELL_MUX_TEST_MQTT_RESPONSE_TIMEOUT_MS)) {
+               !uTimeoutExpiredMs(timeoutStart,
+                                  U_CELL_MUX_TEST_MQTT_RESPONSE_TIMEOUT_MS)) {
             uPortTaskBlock(1000);
         }
 
@@ -814,6 +847,9 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxMqtt")
         uPortFree(pMessageIn);
         uPortFree(pTopicStrIn);
 
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrEnableUartSleep(cellHandle) == 0);
+        }
     } else {
         U_TEST_PRINT_LINE("Either MQTT or CMUX are not supported, skipping...");
     }
@@ -843,6 +879,7 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxHttp")
     // +1 and zero init so that we can treat it as a string
     char imeiBuffer[U_CELL_INFO_IMEI_SIZE + 1] = {0};
     char pathBuffer[64];
+    bool uartSleepWasEnabled;
 
     // In case a previous test failed
     uCellTestPrivateCleanup(&gHandles);
@@ -868,6 +905,12 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxHttp")
     // NOLINTNEXTLINE(misc-redundant-expression)
     if (U_CELL_PRIVATE_HAS(pModule, U_CELL_PRIVATE_FEATURE_CMUX) &&
         U_CELL_PRIVATE_HAS(pModule, U_CELL_PRIVATE_FEATURE_HTTP)) {
+        // Disable UART sleep as CMUX won't work reliably with it on
+        uartSleepWasEnabled = uCellPwrUartSleepIsEnabled(cellHandle);
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrDisableUartSleep(cellHandle) == 0);
+        }
+
         // Create the complete URL from the IP address of the server
         // and the port number; testing with the domain name of the
         // server is done in the tests of u_http_client_test.c.
@@ -949,6 +992,10 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxHttp")
         U_PORT_TEST_ASSERT(uCellMuxDisable(cellHandle) == 0);
 
         U_PORT_TEST_ASSERT(uCellNetDisconnect(cellHandle, NULL) == 0);
+
+        if (uartSleepWasEnabled) {
+            U_PORT_TEST_ASSERT(uCellPwrEnableUartSleep(cellHandle) == 0);
+        }
     } else {
         U_TEST_PRINT_LINE("CMUX or HTTP is not supported, not running tests.");
     }
@@ -990,5 +1037,6 @@ U_PORT_TEST_FUNCTION("[cellMux]", "cellMuxCleanUp")
 }
 
 #endif // #if defined(U_CFG_TEST_CELL_MODULE_TYPE) && !defined(U_CFG_TEST_DISABLE_MUX)
+//  !defined(U_CFG_PPP_ENABLE)
 
 // End of file

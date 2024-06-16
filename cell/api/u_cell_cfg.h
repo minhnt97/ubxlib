@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -101,10 +101,39 @@ typedef enum {
  * FUNCTIONS
  * -------------------------------------------------------------- */
 
-/** Set the bands to be used by the cellular module.
- * The module must be powered on for this to work but must NOT be
- * connected to the cellular network (e.g. by calling
- * uCellNetDisconnect() to be sure) and the module must be
+/** Sets the bands to be used by the cellular module.  See also
+ * uCellCfgSetBandMask(); the difference with uCellCfgSetBands() is
+ * that it builds the band mask itself.  Any existing bands are
+ * replaced by the bands provided to this API.  The module must be
+ * powered on for this to work but must NOT be connected to the
+ * cellular network (e.g. by calling uCellNetDisconnect() to be sure)
+ * and the module must be re-booted afterwards (with a call to
+ * uCellPwrReboot()) for it to take effect.
+ *
+ * Note: for LENA-R8 (and only LENA-R8), setting numBands to 0 means
+ * "enable all bands".
+ *
+ * @param cellHandle  the handle of the cellular instance.
+ * @param rat         the RAT to set the band mask for; must represent
+ *                    a single RAT, for example #U_CELL_NET_RAT_LTE or
+ *                    #U_CELL_NET_RAT_GSM_GPRS_EGPRS, rather than a
+ *                    multi-mode RAT (for example #U_CELL_NET_RAT_GSM_UMTS).
+ * @param numBands    specify the number of bands to be set.
+ * @param[in] pBands  pointer to the array containing the bands that
+ *                    are desired to be set; for example, band
+ *                    numbers 2, 3, 71 and 85.
+ * @return            zero on success or negative error code
+ *                    on failure.
+ */
+int32_t uCellCfgSetBands(uDeviceHandle_t cellHandle,
+                         uCellNetRat_t rat,
+                         size_t numBands,
+                         uint8_t *pBands);
+
+/** Set the bands to be used by the cellular module.  See also
+ * uCellCfgSetBands().  The module must be powered on for this to
+ * work but must NOT be connected to the cellular network (e.g. by
+ * calling uCellNetDisconnect() to be sure) and the module must be
  * re-booted afterwards (with a call to uCellPwrReboot()) for it to
  * take effect.
  *
@@ -309,7 +338,24 @@ int32_t uCellCfgGetActiveSerialInterface(uDeviceHandle_t cellHandle);
  *                    failure.
  */
 int32_t uCellCfgSetUdconf(uDeviceHandle_t cellHandle, int32_t param1,
-                          int32_t param2,  int32_t param3);
+                          int32_t param2, int32_t param3);
+
+/** This allows a UDCONF command to be sent to the
+ * module with up to "n" integer parameters.  A reboot is usually
+ * required afterwards to write the setting to non-volatile memory.
+ *
+ * @param cellHandle      the handle of the cellular instance.
+ * @param numParameters   specify the number of parameters to be set.
+ * @param[in] pParameters pointer to the array containing the parameters
+ *                        that are desired to be set.  The parameters
+ *                        should be positive integers.  First two
+ *                        parameters are mandatory.
+ * @return                zero on success or negative error code on
+ *                        failure.
+ */
+int32_t uCellCfgSetUdconfMultiParam(uDeviceHandle_t cellHandle,
+                                    size_t numParameters,
+                                    int32_t *pParameters);
 
 /** Get the given "AT+UDCONF" setting.
  *
@@ -332,17 +378,17 @@ int32_t uCellCfgGetUdconf(uDeviceHandle_t cellHandle, int32_t param1,
  *
  *  @param cellHandle    the handle of the cellular instance.
  *  @param fsRestoreType the file system factory restore type. Valid options
- *                       are 0, 1 and 2.
- *                       0: no factory restore.
- *                       1: Check datasheet, if this option is
- *                          supported by your module.
+ *                       are 0, 1 and 2:
+ *                       0: no factory restore,
+ *                       1: check AT interface manual to see if this
+ *                          option is supported by your module,
  *                       2: all files stored in FS deleted.
  * @param nvmRestoreType the file system factory restore type. Valid options
- *                       are 0, 1 and 2.
- *                       0: no factory restore.
- *                       1: NVM flash sectors erased.
- *                       2: Check datasheet, if this option is
- *                          supported by your module.
+ *                       are 0, 1 and 2:
+ *                       0: no factory restore,
+ *                       1: NVM flash sectors erased,
+ *                       2: check AT interface manual to see if this
+ *                          option is supported by your module.
  * @return               zero on success or negative error code on
  *                       failure.
  */
@@ -360,6 +406,9 @@ int32_t uCellCfgFactoryReset(uDeviceHandle_t cellHandle, int32_t fsRestoreType,
  * with a call to uCellCfgSetAutoBaudOff() in the case of SARA-R5
  * and SARA-U201.
  *
+ * Note: DTR must be low in order for a greeting message to be
+ * emitted.
+ *
  * @param cellHandle   the handle of the cellular instance.
  * @param[in] pStr     the null-terminated greeting message; use NULL
  *                     to remove an existing greeting message.
@@ -376,6 +425,9 @@ int32_t uCellCfgSetGreeting(uDeviceHandle_t cellHandle, const char *pStr);
  * Note: if DTR is being used to control power saving (i.e. a DTR
  * pin has been set using uCellPwrSetDtrPowerSavingPin()) then the
  * greeting message is NOT emitted by the module at a reboot.
+ *
+ * Note: DTR must be low in order for a greeting message to be
+ * emitted.
  *
  * Obviously for this to be useful it is important that the greeting
  * message is unique; you may consider using #U_CELL_CFG_GREETING.

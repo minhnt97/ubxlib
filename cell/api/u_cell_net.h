@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,6 +86,10 @@ extern "C" {
 # define U_CELL_NET_MAX_APN_LENGTH_BYTES 101
 #endif
 
+/* NOTE TO MAINTAINERS: if you change this #define you will
+ * need to change u-blox,ubxlib-network-cell.yaml over in
+ * /port/platform/zephyr/dts/bindings to match.
+ */
 #ifndef U_CELL_NET_CONNECT_TIMEOUT_SECONDS
 /** The time in seconds allowed for a connection to complete.
  * This is a long time since, in the worst case, deep scan
@@ -270,6 +274,10 @@ typedef enum {
 } uCellNetRegDomain_t;
 
 /** The possible authentication modes for the network connection.
+ *
+ * Note: there is also a #uPortPppAuthenticationMode_t enumeration
+ * which is set to match this one.  If you make a change here you
+ * may need to make a change there also.
  */
 typedef enum {
     U_CELL_NET_AUTHENTICATION_MODE_NONE = 0, /**< \deprecated please use #U_CELL_NET_AUTHENTICATION_MODE_NOT_SET. */
@@ -308,6 +316,78 @@ typedef struct {
 /* ----------------------------------------------------------------
  * FUNCTIONS
  * -------------------------------------------------------------- */
+
+/** Register with the cellular network in async mode and activate
+ * a PDP context when we are registered to the network.
+ * This is the asynchronous version of uCellNetConnect().
+ * If a connection is already active this function will simply
+ * return unless the requested APN is different from the APN of
+ * the current connection, in which case that PDP context will be
+ * deactivated (and potentially deregistration may occur) then
+ * [registration will occur and] the new context will be activated.
+ *
+ * Note: if you are required to set a user name and password then
+ * you MAY also need to set the authentication mode that will be
+ * used; see uCellNetSetAuthenticationMode() for this.
+ *
+ * Note: In async Mode, We cannot set MCC and MNC of the PLMN for
+ * manual PLMN selection. Hence the reason this function is missing
+ * that parameter. If you really need it then try the uCellNetConnect()
+ * function. But you will loose the ability of async registration.
+ *
+ * Note: Registration status callback could be delayed even if we
+ * are registered to the network.
+ *
+ * Note: This API is not supported for SARA-U201.
+ *
+ * @param cellHandle             the handle of the cellular instance.
+ * @param[in] pApn               pointer to a string giving the APN to
+ *                               use; set to NULL if no APN is specified
+ *                               by the service provider, in which
+ *                               case the APN database in u_cell_apn_db.h
+ *                               will be used to determine a default APN.
+ *                               To force an empty APN to be used, specify
+ *                               "" for pApn.  Note: if the APN is chosen
+ *                               from the APN database and that APN requires
+ *                               a username and password then, if the
+ *                               module does not aupport automatic choice
+ *                               of authentication mode (e.g. SARA-R4,
+ *                               LARA-R6 and LENA-R8 do not), the
+ *                               authentication mode set with the last
+ *                               call to uCellNetSetAuthenticationMode()
+ *                               will be used or, if that function has
+ *                               never been called,
+ *                               #U_CELL_NET_APN_DB_AUTHENTICATION_MODE
+ *                               will be used.
+ * @param[in] pUsername          pointer to a string giving the user name
+ *                               for PPP authentication; may be set to
+ *                               NULL if no user name or password is
+ *                               required.
+ * @param[in] pPassword          pointer to a string giving the password
+ *                               for PPP authentication; must be
+ *                               non-NULL if pUsername is non-NULL, ignored
+ *                               if pUsername is NULL.
+ * @return                       zero on success or negative error code on
+ *                               failure.
+ */
+int32_t uCellNetConnectStart(uDeviceHandle_t cellHandle,
+                             const char *pApn,
+                             const char *pUsername,
+                             const char *pPassword);
+
+/** Disconnect from the network. If there is an active PDP Context it
+ * will be deactivated. The state of the module will be that the
+ * radio is in airplane mode (AT+CFUN=4).
+ *
+ * This function is the counterpart of the uCellNetConnectStart()
+ *
+ * Note: This API is not supported for SARA-U201.
+ *
+ * @param cellHandle             the handle of the cellular instance.
+ * @return                       zero on success or negative error code on
+ *                               failure.
+ */
+int32_t uCellNetConnectStop(uDeviceHandle_t cellHandle);
 
 /** Register with the cellular network and activate a PDP context.
  * This function provides the registration and activation of the
@@ -641,8 +721,8 @@ void uCellNetScanGetLast(uDeviceHandle_t cellHandle);
  *                                   IMPORTANT: the callback function should
  *                                   not call back into this API (which will
  *                                   be locked): it must return false to allow
- *                                   uCellNetDeepScan() to exit and only then
- *                                   should it call, for instance,
+ *                                   uCellNetDeepScan() to exit. Only then
+ *                                   should the application call, for instance,
  *                                   uCellTimeSyncCellEnable().
  * @param[in,out] pCallbackParameter a pointer to be passed to pCallback
  *                                   as its third parameter; may be NULL.
@@ -653,9 +733,9 @@ void uCellNetScanGetLast(uDeviceHandle_t cellHandle);
  *                                   be repeated because the module indicated
  *                                   a failure part way through then the
  *                                   callback may end up being called more
- *                                   times than the return value might suggest.
+ *                                   times than this return value might suggest.
  *                                   A value of zero will be returned if the
- *                                   scan succeeds but returns no cells.
+ *                                   scan succeeded but returned no cells.
  */
 int32_t uCellNetDeepScan(uDeviceHandle_t cellHandle,
                          bool (*pCallback) (uDeviceHandle_t,
@@ -753,6 +833,25 @@ int32_t uCellNetSetBaseStationConnectionStatusCallback(uDeviceHandle_t cellHandl
 uCellNetStatus_t uCellNetGetNetworkStatus(uDeviceHandle_t cellHandle,
                                           uCellNetRegDomain_t domain);
 
+/** Get the last EMM reject cause value sent by the network; not
+ * supported by all module types (for example SARA-R4 series
+ * modules do not support this).  If there is nothing to report
+ * zero will be returned.  Note that the error may have
+ * occurred some time in the past, e.g. you may be successfully
+ * registered but if, on the way, you were temporarily denied
+ * service then this function will likely return the reason for
+ * that denial (e.g. 11 for "PLMN not allowed"), rather than zero.
+ *
+ * Note: SARA-U201 always returns error 148, "SM activation error",
+ * even after a connection has succeeded.
+ *
+ * @param cellHandle  the handle of the cellular instance.
+ * @return            on success the last EMM cause from the network,
+ *                    see appendix A.3 of the AT commands manual,
+ *                    else negative error code.
+ */
+int32_t uCellNetGetLastEmmRejectCause(uDeviceHandle_t cellHandle);
+
 /** Get a value indicating whether the module is registered on
  * the network, roaming or home networks.
  *
@@ -810,6 +909,10 @@ int32_t uCellNetGetMccMnc(uDeviceHandle_t cellHandle,
 
 /** Return the IP address of the currently active connection.
  *
+ * Note: if you are using PPP also, the IP address here _may_
+ * not be the same as that of the PPP connection: please refer
+ * to your PPP client for the IP address of the PPP connection.
+ *
  * @param cellHandle  the handle of the cellular instance.
  * @param[out] pStr   should point to storage of length at least
  *                    #U_CELL_NET_IP_ADDRESS_SIZE bytes in size.
@@ -830,6 +933,10 @@ int32_t uCellNetGetIpAddressStr(uDeviceHandle_t cellHandle, char *pStr);
  * use hostnames in these API functions, only IP addresses.  Note
  * that some modules do not support reading out the DNS address
  * (e.g. LENA-R8 does not).
+ *
+ * Note: if you are using PPP also, the DNS addresses here _may_
+ * not be the same as that of the PPP connection: please refer
+ * to your PPP client for the DNS addresses of the PPP connection.
  *
  * @param cellHandle    the handle of the cellular instance.
  * @param v6            set this to true if IPV6 DNS addresses

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@
 #include "stdlib.h"  // strol(), atoi(), strol(), strtof()
 #include "string.h"  // memset(), strncpy(), strtok_r(), strtol()
 #include "u_error_common.h"
+#include "u_timeout.h"
 #include "u_at_client.h"
 #include "u_ble.h"
 #include "u_ble_cfg.h"
@@ -142,12 +143,15 @@ int32_t uBleNusInit(uDeviceHandle_t devHandle,
     gIsServer = pAddress == NULL;
     if (gIsServer) {
         // Define the NUS service and characteristics
-        errorCode = uBleGattAddService(gDeviceHandle, NUS_SERVICE_UUID);
+        errorCode = uBleGattBeginAddService(gDeviceHandle, NUS_SERVICE_UUID);
         if (errorCode == (int32_t)U_ERROR_COMMON_SUCCESS) {
             errorCode = uBleGattAddCharacteristic(gDeviceHandle, NUS_RX_CHAR_UUID, 0x0C, &gRxHandle);
         }
         if (errorCode == (int32_t)U_ERROR_COMMON_SUCCESS) {
             errorCode = uBleGattAddCharacteristic(gDeviceHandle, NUS_TX_CHAR_UUID, 0x10, &gTxHandle);
+        }
+        if (errorCode == (int32_t)U_ERROR_COMMON_SUCCESS) {
+            errorCode = uBleGattEndAddService(gDeviceHandle);
         }
         if (errorCode == (int32_t)U_ERROR_COMMON_SUCCESS) {
             // Detect client writes
@@ -168,9 +172,9 @@ int32_t uBleNusInit(uDeviceHandle_t devHandle,
                 uBleGattDiscoverChar(gDeviceHandle, gConnHandle, discoverCharacteristcs);
                 if (gRxHandle != 0 && gTxHandle != 0) {
                     // Detect server writes
-                    errorCode = uBleGattEnableNotification(gDeviceHandle, gConnHandle, gTxHandle);
+                    errorCode = uBleGattSetNotificationCallback(gDeviceHandle, receiveCallback);
                     if (errorCode == (int32_t)U_ERROR_COMMON_SUCCESS) {
-                        errorCode = uBleGattSetNotificationCallback(gDeviceHandle, receiveCallback);
+                        errorCode = uBleGattEnableNotification(gDeviceHandle, gConnHandle, gTxHandle);
                     }
                     if (errorCode != (int32_t)U_ERROR_COMMON_SUCCESS) {
                         uBleGapDisconnect(gDeviceHandle, gConnHandle);
@@ -216,7 +220,7 @@ int32_t uBleNusSetAdvData(uint8_t *pAdvData, uint8_t advDataSize)
     // Reverse order
     for (int32_t i = 0; i < size / 2; i++) {
         uint8_t temp = pAdvData[i];
-        uint8_t pos = size - i - 1;
+        uint8_t pos = (uint8_t) (size - i - 1);
         pAdvData[i] = pAdvData[pos];
         pAdvData[pos] = temp;
     }

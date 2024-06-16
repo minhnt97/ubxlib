@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -211,7 +211,6 @@ int32_t uShortRangeEdmStreamIpEventCallbackSet(int32_t handle,
  */
 void uShortRangeEdmStreamIpEventCallbackRemove(int32_t handle);
 
-
 /** Set a callback to be called when a Bluetooth event occurs.
  * pFunction will be called asynchronously in its own task.
  *
@@ -286,7 +285,6 @@ int32_t uShortRangeEdmStreamDataEventCallbackSet(int32_t handle,
  */
 void uShortRangeEdmStreamDataEventCallbackRemove(int32_t handle,
                                                  uShortRangeConnectionType_t type);
-
 
 /** Send an event to the callback.  This allows the user to
  * re-trigger events: for instance, if a data event has only

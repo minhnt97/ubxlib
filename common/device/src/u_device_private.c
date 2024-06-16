@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -166,13 +166,23 @@ int32_t uDevicePrivateI2cOpen(const uDeviceCfgI2c_t *pCfgI2c)
                 // If we're opening rather than adopting, so can
                 // touch the HW, then also configure the clock if the
                 // user has set a clock frequency
-                if ((errorCodeOrI2cHandle >= 0) && (pCfgI2c->clockHertz > 0)) {
-                    x = uPortI2cSetClock(errorCodeOrI2cHandle, pCfgI2c->clockHertz);
-                    if (x < 0) {
-                        // Clean up on error
-                        uPortI2cClose(errorCodeOrI2cHandle);
-                        errorCodeOrI2cHandle = x;
+                if (errorCodeOrI2cHandle >= 0) {
+                    if (pCfgI2c->clockHertz > 0) {
+                        x = uPortI2cSetClock(errorCodeOrI2cHandle, pCfgI2c->clockHertz);
+                        if (x < 0) {
+                            // Clean up on error
+                            uPortI2cClose(errorCodeOrI2cHandle);
+                            errorCodeOrI2cHandle = x;
+                        }
                     }
+                }
+            }
+            if ((errorCodeOrI2cHandle >= 0) && (pCfgI2c->maxSegmentSize > 0)) {
+                if (uPortI2cSetMaxSegmentSize(errorCodeOrI2cHandle, pCfgI2c->maxSegmentSize) < 0) {
+                    // Clean up on error
+                    uPortI2cClose(errorCodeOrI2cHandle);
+                    // Return a meaningful error code
+                    errorCodeOrI2cHandle = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
                 }
             }
             if (errorCodeOrI2cHandle >= 0) {

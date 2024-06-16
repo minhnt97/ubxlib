@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -145,6 +145,8 @@ void uCellHttpPrivateLink(void);
 
 /** Open a cellular HTTP client instance.
  *
+ * Note that HTTP operation is NOT supported on LENA-R8.
+ *
  * @param cellHandle         the handle of the cellular instance to
  *                           be used.
  * @param[in] pServerName    the null-terminated name of the HTTP
@@ -240,6 +242,8 @@ bool uCellHttpIsSecured(uDeviceHandle_t cellHandle, int32_t httpHandle,
  * IMPORTANT: you MUST wait for pCallback to be called before issuing your next
  * HTTP request.
  *
+ * Note that HTTP operation is NOT supported on LENA-R8.
+ *
  * This function is thread-safe provided the caller choses a response file name
  * that does not clash with calls made from other threads (or uses the automatic
  * option).
@@ -258,8 +262,10 @@ bool uCellHttpIsSecured(uDeviceHandle_t cellHandle, int32_t httpHandle,
  *                                "/thing/form.html"; cannot be NULL.
  * @param[in] pFileNameResponse   the null-terminated file name in the cellular
  *                                modules' file system to which the HTTP response
- *                                will be written; this may be NULL and a file name
- *                                will be provided by the cellular module.
+ *                                will be written.  This may be NULL and a file
+ *                                name will be provided by the cellular module;
+ *                                where provided it must be no more than
+ *                                #U_CELL_FILE_NAME_MAX_LENGTH.
  * @param[in] pStrPost            the null-terminated string to send for a
  *                                #U_CELL_HTTP_REQUEST_POST; the data should
  *                                be printable ASCII text (isprint() must be
@@ -289,6 +295,8 @@ int32_t uCellHttpRequest(uDeviceHandle_t cellHandle, int32_t httpHandle,
  * IMPORTANT: you MUST wait for pCallback to be called before issuing your next
  * HTTP request.
  *
+ * Note that HTTP operation is NOT supported on LENA-R8.
+ *
  * This function is thread-safe provided the caller choses file names
  * that do not clash with calls made from other threads (or uses the
  * automatic option).
@@ -306,8 +314,9 @@ int32_t uCellHttpRequest(uDeviceHandle_t cellHandle, int32_t httpHandle,
  *                                cannot be NULL.
  * @param[in] pFileNameResponse   the null-terminated file name in the cellular modules'
  *                                file system to which the HTTP response will be
- *                                written; this may be NULL and a file name will be
- *                                provided by the cellular module.
+ *                                written.  This may be NULL and a file name will be
+ *                                provided by the cellular module; where provided
+ *                                it must be no more than #U_CELL_FILE_NAME_MAX_LENGTH.
  * @param[in] pFileNamePutPost    the null-terminated file name in the cellular
  *                                module's file system to use as a source for the
  *                                data to be sent for #U_CELL_HTTP_REQUEST_PUT

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,8 @@
 #include "u_port_uart.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -114,7 +116,7 @@ typedef struct {
 
 /** Used for keepGoingCallback() timeout.
  */
-static int64_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** Generic handles.
  */
@@ -317,6 +319,7 @@ static uCellSockTestOption_t gSupportedOptions[] = {
         (1UL << U_CELL_MODULE_TYPE_SARA_R410M_03B) |
         (1UL << U_CELL_MODULE_TYPE_SARA_R422)      |
         (1UL << U_CELL_MODULE_TYPE_SARA_R5)        |
+        (1UL << U_CELL_MODULE_TYPE_SARA_R52)       |
         (1UL << U_CELL_MODULE_TYPE_LARA_R6)        |
         (1UL << U_CELL_MODULE_TYPE_LENA_R8),
         U_SOCK_OPT_LEVEL_SOCK, U_SOCK_OPT_LINGER, sizeof(uSockLinger_t), compareLinger, changeLinger
@@ -459,7 +462,8 @@ static bool keepGoingCallback(uDeviceHandle_t unused)
 
     (void) unused;
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -588,8 +592,8 @@ U_PORT_TEST_FUNCTION("[cellSock]", "cellSockBasic")
     // for pModule from now on
 
     // Connect to the network
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     y = uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
                         U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),
@@ -960,8 +964,8 @@ U_PORT_TEST_FUNCTION("[cellSock]", "cellSockOptionSetGet")
     cellHandle = gHandles.cellHandle;
 
     // Connect to the network
-    gStopTimeMs = uPortGetTickTimeMs() +
-                  (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+    gTimeoutStop.timeoutStart = uTimeoutStart();
+    gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
     y = uCellNetConnect(cellHandle, NULL,
 #ifdef U_CELL_TEST_CFG_APN
                         U_PORT_STRINGIFY_QUOTED(U_CELL_TEST_CFG_APN),

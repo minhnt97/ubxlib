@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,8 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_debug.h"
+
+#include "u_timeout.h"
 
 #include "u_time.h"
 
@@ -1246,6 +1248,24 @@ int32_t uCellLocGetSystem(uDeviceHandle_t cellHandle, uint32_t *pGnssSystemTypes
     return errorCode;
 }
 
+// Get the default GNSS systems.
+int32_t uCellLocGetSystemDefault(uDeviceHandle_t cellHandle, uint32_t *pGnssSystemTypesBitMap)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    uCellPrivateInstance_t *pInstance = NULL;
+
+    U_CELL_LOC_ENTRY_FUNCTION(cellHandle, &pInstance, &errorCode);
+
+    if ((errorCode == 0) && (pInstance != NULL) &&
+        (pGnssSystemTypesBitMap != NULL)) {
+        *pGnssSystemTypesBitMap = pInstance->pModule->gnssSystemTypesBitMap;
+    }
+
+    U_CELL_LOC_EXIT_FUNCTION();
+
+    return errorCode;
+}
+
 // Check whether a GNSS chip is present.
 bool uCellLocIsGnssPresent(uDeviceHandle_t cellHandle)
 {
@@ -1730,7 +1750,7 @@ int32_t uCellLocGet(uDeviceHandle_t cellHandle,
     uCellPrivateLocContext_t *pContext;
     uCellLocFixDataStorage_t *pFixDataStorage;
     volatile uCellLocFixDataStorageBlock_t fixDataStorageBlock = {0};
-    int64_t startTime;
+    uTimeoutStart_t timeoutStart;
 
     fixDataStorageBlock.errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
 
@@ -1777,10 +1797,10 @@ int32_t uCellLocGet(uDeviceHandle_t cellHandle,
                 uPortLog("U_CELL_LOC: waiting for the answer...\n");
                 // Wait for the callback called by the URC to set
                 // errorCode inside our block to success
-                startTime = uPortGetTickTimeMs();
+                timeoutStart = uTimeoutStart();
                 while ((fixDataStorageBlock.errorCode == (int32_t) U_ERROR_COMMON_TIMEOUT) &&
                        (((pKeepGoingCallback == NULL) &&
-                         (uPortGetTickTimeMs() - startTime) / 1000 < U_CELL_LOC_TIMEOUT_SECONDS) ||
+                         !uTimeoutExpiredSeconds(timeoutStart, U_CELL_LOC_TIMEOUT_SECONDS)) ||
                         ((pKeepGoingCallback != NULL) && pKeepGoingCallback(cellHandle)))) {
                     // Relax a little
                     uPortTaskBlock(1000);

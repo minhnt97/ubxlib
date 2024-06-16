@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -378,7 +378,6 @@ int32_t uPortQueueReceive(const uPortQueueHandle_t queueHandle,
  */
 int32_t uPortQueueReceiveIrq(const uPortQueueHandle_t queueHandle,
                              void *pEventData);
-
 
 /** Try to receive from the given queue, waiting for the given
  * time for something to arrive.

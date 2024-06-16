@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@
 #include "stddef.h"    // NULL, size_t etc.
 #include "stdint.h"    // int32_t etc.
 #include "stdbool.h"
+#include "string.h"    // strlen()
 
 #include "u_cfg_sw.h"
 #include "u_cfg_app_platform_specific.h"
@@ -53,6 +54,8 @@
 #endif
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #ifdef U_CFG_TEST_SHORT_RANGE_MODULE_TYPE
 #include "u_ble_sps.h"
@@ -136,7 +139,6 @@ U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeInitialisation")
 U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeOpenUart")
 {
     int32_t resourceCount;
-    uAtClientHandle_t atClient = NULL;
     uShortRangeUartConfig_t uart = { .uartPort = U_CFG_APP_SHORT_RANGE_UART,
                                      .baudRate = U_SHORT_RANGE_UART_BAUD_RATE,
                                      .pinTx = U_CFG_APP_PIN_SHORT_RANGE_TXD,
@@ -156,15 +158,18 @@ U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeOpenUart")
     U_PORT_TEST_ASSERT(uPortInit() == 0);
     U_PORT_TEST_ASSERT(uAtClientInit() == 0);
     U_PORT_TEST_ASSERT(uShortRangeInit() == 0);
-    U_PORT_TEST_ASSERT(uShortRangeTestPrivatePreamble(U_CFG_TEST_SHORT_RANGE_MODULE_TYPE,
+    U_PORT_TEST_ASSERT(uShortRangeTestPrivatePreamble(U_SHORT_RANGE_MODULE_TYPE_ANY,
                                                       &uart,
                                                       &gHandles) == 0);
 
     U_PORT_TEST_ASSERT(uShortRangeGetUartHandle(gHandles.devHandle) == gHandles.uartHandle);
+#ifndef U_UCONNECT_GEN2
+    uAtClientHandle_t atClient = NULL;
     U_PORT_TEST_ASSERT(uShortRangeGetEdmStreamHandle(gHandles.devHandle) ==
                        gHandles.edmStreamHandle);
     uShortRangeAtClientHandleGet(gHandles.devHandle, &atClient);
     U_PORT_TEST_ASSERT(gHandles.atClientHandle == atClient);
+#endif
     U_PORT_TEST_ASSERT(uShortRangeAttention(gHandles.devHandle) == 0);
 
     U_TEST_PRINT_LINE("calling uShortRangeOpenUart with same arg twice,"
@@ -205,6 +210,8 @@ U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeOpenUart")
 U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeUartSetBaudrate")
 {
     uAtClientHandle_t atClient = NULL;
+    int32_t x;
+    char buffer[32];
     uShortRangeUartConfig_t uart = { .uartPort = U_CFG_APP_SHORT_RANGE_UART,
                                      .baudRate = U_SHORT_RANGE_UART_BAUD_RATE,
                                      .pinTx = U_CFG_APP_PIN_SHORT_RANGE_TXD,
@@ -249,14 +256,20 @@ U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeUartSetBaudrate")
         gHandles.edmStreamHandle = uShortRangeGetEdmStreamHandle(gHandles.devHandle);
         U_PORT_TEST_ASSERT(uShortRangeAtClientHandleGet(gHandles.devHandle,
                                                         &gHandles.atClientHandle) == 0);
-        // This should receive a valid response
+        // These should receive a valid response
         U_PORT_TEST_ASSERT(uShortRangeAttention(gHandles.devHandle) == 0);
+        x = uShortRangeGetFirmwareVersionStr(gHandles.devHandle, buffer, sizeof(buffer));
+        U_PORT_TEST_ASSERT(x > 0);
+        U_PORT_TEST_ASSERT(x == strlen(buffer));
+        U_TEST_PRINT_LINE("after setting baudrate, module FW version reads as \"%s\".", buffer);
     }
     uShortRangeTestPrivateCleanup(&gHandles);
     U_TEST_PRINT_LINE("shortRangeUartSetBaudrate succeded.");
     // Printed for information: asserting happens in the postamble
     uTestUtilResourceCheck(U_TEST_PREFIX, NULL, true);
 }
+
+#ifndef U_UCONNECT_GEN2
 
 U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeMemFullRecovery")
 {
@@ -322,6 +335,7 @@ U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeMemFullRecovery")
     // Printed for information: asserting happens in the postamble
     uTestUtilResourceCheck(U_TEST_PREFIX, NULL, true);
 }
+#endif
 
 #if defined(U_CFG_APP_PIN_SHORT_RANGE_RESET_TO_DEFAULTS) && (U_CFG_APP_PIN_SHORT_RANGE_RESET_TO_DEFAULTS >= 0)
 
@@ -365,9 +379,11 @@ U_PORT_TEST_FUNCTION("[shortRange]", "shortRangeResetToDefaultSettings")
     // Must re-get the handles since uShortRangeSetBaudrate() will have
     // closed and re-opened them all
     gHandles.uartHandle = uShortRangeGetUartHandle(gHandles.devHandle);
+#ifndef U_UCONNECT_GEN2
     gHandles.edmStreamHandle = uShortRangeGetEdmStreamHandle(gHandles.devHandle);
     U_PORT_TEST_ASSERT(uShortRangeAtClientHandleGet(gHandles.devHandle,
                                                     &gHandles.atClientHandle) == 0);
+#endif
     // This should receive a valid response
     U_PORT_TEST_ASSERT(uShortRangeAttention(gHandles.devHandle) == 0);
 

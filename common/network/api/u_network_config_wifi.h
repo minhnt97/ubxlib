@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,13 +46,30 @@
  * irrespective of whether Wifi is used there.
  */
 
+/* NOTE TO MAINTAINERS: if you change this enum you will
+ * need to change u-blox,ubxlib-network-wifi.yaml over in
+ * /port/platform/zephyr/dts/bindings to match  and you will also
+ * need to update the table in the Zephyr u_port_board_cfg.c file
+ * that maps string to enum.
+ */
 typedef enum {
+    U_WIFI_MODE_FORCE_INT32 = 0x7FFFFFFF, /**< Force this to be a 32-bit
+                                               enum since the construction
+                                               in the Zephyr
+                                               u_port_board_cfg.c requires
+                                               that. */
     U_WIFI_MODE_STA = 0, /**< Wifi station */
     U_WIFI_MODE_AP,      /**< Wifi access point */
     U_WIFI_MODE_STA_AP,  /**< Station and access point */
     U_WIFI_MODE_NONE     /**< Inactive */
 } uNetworkWifiMode_t;
 
+/* NOTE TO MAINTAINERS: if you change this structure you will
+ * need to change u-blox,ubxlib-network-wifi.yaml over in
+ * /port/platform/zephyr/dts/bindings to match and you may also
+ * need to change the code in the Zephyr u_port_board_cfg.c file
+ * that parses the values.
+ */
 /** The network configuration for Wifi station and access point.
  */
 typedef struct {
@@ -80,17 +97,24 @@ typedef struct {
     const char *pApPassPhrase;    /**< access point WPA/WPA2/WPA3 passphrase.
                                        Should be NULL for open. */
     const char *pApIpAddress;     /**< ip address of the access point. */
+    /* Add any new version 0 structure items to the end here.
+     *
+     * IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT:
+     * See note above.
+     */
     /* This is the end of version 0 of this
-       structure: should any fields be added to
-       this structure in future they must be
+       structure: should any fields (that cannot
+       be interpreted as absent by dint of being
+       initialised to zero) be added to this
+       structure in future they must be
        added AFTER this point and instructions
        must be given against each one as to how
        to set the version field if any of the
        new fields are populated. For example, if
        int32_t magic were added, the comment
        against it might end with the clause "; if this
-       field is populated then the version field
-       of this structure must be set to 1 or higher". */
+       field is populated then the version field of
+       this structure must be set to 1 or higher". */
 } uNetworkCfgWifi_t;
 
 /** @}*/

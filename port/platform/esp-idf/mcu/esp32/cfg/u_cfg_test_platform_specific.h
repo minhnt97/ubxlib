@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,9 @@
 
 /** @file
  * @brief Porting layer and configuration items passed in at application
- * level when executing tests on the ESP32 platform.
+ * level when executing tests on the ESP32 platform; NONE of the
+ * parameters here are compiled into ubxlib itself.
+ *
  * Note that the pin numbers used below should be those of the MCU: if you
  * are using an MCU inside a u-blox module the IO pin numbering for
  * the module is likely different to that from the MCU: check the data
@@ -75,10 +77,18 @@
  * COMPILE-TIME MACROS: HEAP RELATED
  * -------------------------------------------------------------- */
 
+#ifdef U_CFG_PPP_ENABLE
+/** The minimum free heap space permitted, i.e. what's left for
+ * user code; this is a smaller limit when PPP capability is enabled
+ * since we switch on the IP stack within ESP-IDF.
+ */
+# define U_CFG_TEST_HEAP_MIN_FREE_BYTES (1024 * 170)
+#else
 /** The minimum free heap space permitted, i.e. what's left for
  * user code.
  */
-#define U_CFG_TEST_HEAP_MIN_FREE_BYTES (1024 * 185)
+# define U_CFG_TEST_HEAP_MIN_FREE_BYTES (1024 * 185)
+#endif
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS: OS RELATED

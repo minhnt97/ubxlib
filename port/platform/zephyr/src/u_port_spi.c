@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,13 +20,24 @@
  * @brief Implementation of the port SPI API for the Zephyr platform.
  */
 
+#include <version.h>
+
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/types.h>
+#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/spi.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/devicetree/spi.h>
+#else
 #include <zephyr/types.h>
 #include <kernel.h>
+#include <device.h>
 #include <drivers/spi.h>
 #include <drivers/gpio.h>
 #include <devicetree/spi.h>
+#endif
 
-#include <device.h>
 #include <soc.h>
 
 #include "stddef.h"
@@ -44,7 +55,6 @@
 #include "u_port_spi.h"
 #include "u_port_private.h"
 #include "u_cfg_os_platform_specific.h"
-#include "version.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -86,6 +96,7 @@ typedef struct {
     const struct device *pDevice;  // NULL if not in use
     struct spi_config spiConfig;
     struct spi_cs_control spiCsControl;
+    size_t maxSegmentSize;
 } uPortSpiCfg_t;
 
 /* ----------------------------------------------------------------
@@ -165,7 +176,7 @@ static int32_t getSpiCsControl(int32_t spi, int32_t pin, int32_t index,
         pin &= ~U_COMMON_SPI_PIN_SELECT_INVERTED;
         // Convert the pin into a port and a pin
         pPort = pUPortPrivateGetGpioDevice(pin);
-        pin = pin % GPIO_MAX_PINS_PER_PORT;
+        pin = pin % uPortPrivateGetGpioPortMaxPins();
     }
 
     if (((pin < 0) || (pPort != NULL)) &&
@@ -335,7 +346,7 @@ static int32_t setSpiConfig(int32_t spi, uPortSpiCfg_t *pSpiCfg,
         pSpiCfg->spiCsControl.gpio_dev = pUPortPrivateGetGpioDevice(pinSelect);
         if (pSpiCfg->spiCsControl.gpio_dev != NULL) {
             errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-            pSpiCfg->spiCsControl.gpio_pin = pinSelect % GPIO_MAX_PINS_PER_PORT;
+            pSpiCfg->spiCsControl.gpio_pin = pinSelect % uPortPrivateGetGpioPortMaxPins();
             if (!pinSelectInverted) {
                 pSpiCfg->spiCsControl.gpio_dt_flags = GPIO_ACTIVE_LOW;
             }
@@ -361,14 +372,14 @@ static int32_t setSpiConfig(int32_t spi, uPortSpiCfg_t *pSpiCfg,
             // hook-in any-old GPIO if we initialise it
             pGpioPort = pUPortPrivateGetGpioDevice(pinSelect);
             if (pGpioPort != NULL) {
-                pinSelect = pinSelect % GPIO_MAX_PINS_PER_PORT;
+                pinSelect = pinSelect % uPortPrivateGetGpioPortMaxPins();
                 if (!pinSelectInverted) {
                     gpioFlags |= GPIO_ACTIVE_LOW;
                 }
-                if (gpio_pin_configure(pGpioPort, pinSelect, gpioFlags) == 0) {
+                if (gpio_pin_configure(pGpioPort, (gpio_pin_t) pinSelect, gpioFlags) == 0) {
                     pSpiCfg->spiCsControl.gpio.port = pGpioPort;
-                    pSpiCfg->spiCsControl.gpio.pin = pinSelect;
-                    pSpiCfg->spiCsControl.gpio.dt_flags = gpioFlags;
+                    pSpiCfg->spiCsControl.gpio.pin = (gpio_pin_t) pinSelect;
+                    pSpiCfg->spiCsControl.gpio.dt_flags = (gpio_dt_flags_t) gpioFlags;
 #if ((KERNEL_VERSION_MAJOR < 3) || (KERNEL_VERSION_MAJOR == 3 && KERNEL_VERSION_MINOR < 4))
                     pSpiCfg->spiConfig.cs = &pSpiCfg->spiCsControl;
 #else
@@ -493,6 +504,7 @@ int32_t uPortSpiOpen(int32_t spi, int32_t pinMosi, int32_t pinMiso,
             }
 
             if (pDevice != NULL) {
+                gSpiCfg[spi].maxSegmentSize = 0;
                 handleOrErrorCode = setSpiConfig(spi, &(gSpiCfg[spi]), &device);
                 if (handleOrErrorCode == 0) {
                     // Hook the device data structure into the entry
@@ -527,6 +539,49 @@ void uPortSpiClose(int32_t handle)
 
         U_PORT_MUTEX_UNLOCK(gMutex);
     }
+}
+
+// Set the maximum SPI segment size.
+int32_t uPortSpiSetMaxSegmentSize(int32_t handle, size_t maxSegmentSize)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        if ((handle >= 0) && (handle < sizeof(gSpiCfg) / sizeof(gSpiCfg[0])) &&
+            (gSpiCfg[handle].pDevice != NULL)) {
+            gSpiCfg[handle].maxSegmentSize = maxSegmentSize;
+            errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCode;
+}
+
+// Get the maximum SPI segment size.
+int32_t uPortSpiGetMaxSegmentSize(int32_t handle)
+{
+    int32_t errorCodeOrMaxSegmentSize = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCodeOrMaxSegmentSize = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        if ((handle >= 0) && (handle < sizeof(gSpiCfg) / sizeof(gSpiCfg[0])) &&
+            (gSpiCfg[handle].pDevice != NULL)) {
+            errorCodeOrMaxSegmentSize = (int32_t) gSpiCfg[handle].maxSegmentSize;
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCodeOrMaxSegmentSize;
 }
 
 // Set the configuration of the device.
@@ -678,6 +733,7 @@ int32_t uPortSpiControllerSendReceiveBlock(int32_t handle, const char *pSend,
                                            size_t bytesToReceive)
 {
     int32_t errorCodeOrReceiveSize = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+    int32_t x;
     uPortSpiCfg_t *pSpiCfg;
     struct spi_buf sendBuffer;
     struct spi_buf_set sendBufferList;
@@ -692,31 +748,51 @@ int32_t uPortSpiControllerSendReceiveBlock(int32_t handle, const char *pSend,
 
         errorCodeOrReceiveSize = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
         if ((handle >= 0) && (handle < sizeof(gSpiCfg) / sizeof(gSpiCfg[0])) &&
-            (gSpiCfg[handle].pDevice != NULL)) {
+            (gSpiCfg[handle].pDevice != NULL)  &&
+            ((pSend != NULL) || (bytesToSend == 0)) &&
+            ((pReceive != NULL) || (bytesToReceive == 0))) {
             pSpiCfg = &(gSpiCfg[handle]);
+            errorCodeOrReceiveSize = 0;
+            while ((errorCodeOrReceiveSize >= 0) &&
+                   ((bytesToSend > 0) || (bytesToReceive > 0))) {
+                sendBuffer.buf = NULL;
+                sendBuffer.len = 0;
+                if (bytesToSend > 0) {
+                    sendBuffer.buf = (char *) pSend;
+                    sendBuffer.len = bytesToSend;
+                    if ((pSpiCfg->maxSegmentSize > 0) &&
+                        (sendBuffer.len > pSpiCfg->maxSegmentSize)) {
+                        sendBuffer.len = pSpiCfg->maxSegmentSize;
+                    }
+                    bytesToSend -= sendBuffer.len;
+                    pSend += sendBuffer.len;
+                    sendBufferList.buffers = &sendBuffer;
+                    sendBufferList.count = 1;
+                    pSendBufferList = &sendBufferList;
+                }
+                receiveBuffer.buf = NULL;
+                receiveBuffer.len = 0;
+                if (bytesToReceive > 0) {
+                    receiveBuffer.buf = pReceive;
+                    receiveBuffer.len = bytesToReceive;
+                    if ((pSpiCfg->maxSegmentSize > 0) &&
+                        (receiveBuffer.len > pSpiCfg->maxSegmentSize)) {
+                        receiveBuffer.len = pSpiCfg->maxSegmentSize;
+                    }
+                    bytesToReceive -= receiveBuffer.len;
+                    pReceive += receiveBuffer.len;
+                    receiveBufferList.buffers = &receiveBuffer;
+                    receiveBufferList.count = 1;
+                    pReceiveBufferList = &receiveBufferList;
+                }
 
-            if (pSend != NULL) {
-                sendBuffer.buf = (char *) pSend;
-                sendBuffer.len = bytesToSend;
-                sendBufferList.buffers = &sendBuffer;
-                sendBufferList.count = 1;
-                pSendBufferList = &sendBufferList;
-            }
-
-            if (pReceive != NULL) {
-                receiveBuffer.buf = pReceive;
-                receiveBuffer.len = bytesToReceive;
-                receiveBufferList.buffers = &receiveBuffer;
-                receiveBufferList.count = 1;
-                pReceiveBufferList = &receiveBufferList;
-            } else {
-                bytesToReceive = 0;
-            }
-
-            errorCodeOrReceiveSize = spi_transceive(pSpiCfg->pDevice, &(pSpiCfg->spiConfig),
-                                                    pSendBufferList, pReceiveBufferList);
-            if (errorCodeOrReceiveSize == 0) {
-                errorCodeOrReceiveSize = bytesToReceive;
+                x = spi_transceive(pSpiCfg->pDevice, &(pSpiCfg->spiConfig),
+                                   pSendBufferList, pReceiveBufferList);
+                if (x == 0) {
+                    errorCodeOrReceiveSize += receiveBuffer.len;
+                } else {
+                    errorCodeOrReceiveSize = x;
+                }
             }
         }
 

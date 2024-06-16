@@ -12,6 +12,15 @@ function(u_add_source_file feature file)
     message(FATAL_ERROR "File does not exist: ${file}")
   endif()
   if (${feature} IN_LIST UBXLIB_FEATURES)
+    if (short_range_gen2 IN_LIST UBXLIB_FEATURES)
+      # Use second generation file instead if available
+      get_filename_component(DIR ${file} DIRECTORY)
+      get_filename_component(NAME ${file} NAME)
+      set(ALT_FILE ${DIR}/gen2/${NAME})
+      if (EXISTS ${ALT_FILE})
+        set(file ${ALT_FILE})
+      endif()
+    endif()
     list(APPEND UBXLIB_SRC ${file})
     set(UBXLIB_SRC ${UBXLIB_SRC} PARENT_SCOPE)
   endif()
@@ -24,7 +33,9 @@ function(u_add_source_dir feature src_dir)
   endif()
   if (${feature} IN_LIST UBXLIB_FEATURES)
     file(GLOB SRCS ${src_dir}/*.c)
-    list(APPEND UBXLIB_SRC ${SRCS})
+    foreach(src_file IN ITEMS ${SRCS})
+      u_add_source_file(${feature} ${src_file})
+    endforeach()
     set(UBXLIB_SRC ${UBXLIB_SRC} PARENT_SCOPE)
   endif()
 endfunction()
@@ -88,6 +99,7 @@ endfunction()
 u_add_module_dir(base ${UBXLIB_BASE}/common/at_client)
 u_add_module_dir(base ${UBXLIB_BASE}/common/error)
 u_add_module_dir(base ${UBXLIB_BASE}/common/assert)
+u_add_module_dir(base ${UBXLIB_BASE}/common/timeout)
 u_add_module_dir(base ${UBXLIB_BASE}/common/location)
 u_add_module_dir(base ${UBXLIB_BASE}/common/mqtt_client)
 u_add_module_dir(base ${UBXLIB_BASE}/common/http_client)
@@ -131,6 +143,7 @@ list(APPEND UBXLIB_INC ${UBXLIB_BASE}/common/network/api)
 list(APPEND UBXLIB_PRIVATE_INC ${UBXLIB_BASE}/common/network/src)
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/device/src/u_device.c)
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/device/src/u_device_serial.c)
+list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/device/src/u_device_serial_wrapped.c)
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/device/src/u_device_shared.c)
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/device/src/u_device_private.c)
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/device/src/u_device_private_cell_stub.c)
@@ -140,7 +153,15 @@ list(APPEND UBXLIB_INC ${UBXLIB_BASE}/common/device/api)
 list(APPEND UBXLIB_PRIVATE_INC ${UBXLIB_BASE}/common/device/src)
 
 # CPP file required for geofencing
-list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/geofence/src/u_geofence_geodesic.cpp)
+# Note: bringing the .c version of this file in if geodesic is not present is not
+# strictly necessary (since the file includes dummy implementations anyway); it
+# is done in order to allow those who don't have C++ support in their toolchain
+# to still compile/use the geofence feature in non-geodesic mode.
+if (geodesic IN_LIST UBXLIB_FEATURES)
+  list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/geofence/src/u_geofence_geodesic.cpp)
+else()
+  list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/common/geofence/src/dummy/u_geofence_geodesic.c)
+endif()
 
 # Default malloc()/free() implementation
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_heap.c)
@@ -150,6 +171,19 @@ list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_timezone.c)
 
 # Default uPortXxxResource implementation
 list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_resource.c)
+
+# Default implementation for certain uPortI2cXxx() and uPortSpiXxx() functions
+list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_i2c_default.c)
+list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_spi_default.c)
+
+# Default implementation for uPortNamePipeXxx()
+list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_named_pipe_default.c)
+
+# Default uPortPppAttach()/uPortPppDetach() implementation
+list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_ppp_default.c)
+
+# Default uPortDeviceXxx implementation
+list(APPEND UBXLIB_SRC ${UBXLIB_BASE}/port/u_port_board_cfg.c)
 
 # Optional features
 
@@ -227,7 +261,7 @@ u_add_test_source_dir(base ${UBXLIB_BASE}/example/utilities/c030_module_fw_updat
 # cause any extra libraries to be linked and
 # UBXLIB_COMPILE_OPTIONS, which can be added to
 # target_compile_definitions(). HOWEVER, it doesn't
-# work for ESP-IDF, which has a "helful" component
+# work for ESP-IDF, which has a "helpful" component
 # system of its own stuck on top, hence BE AWARE
 # THAT that ESP-IDF doesn't use the bit below...
 #
@@ -260,4 +294,12 @@ if (geodesic IN_LIST UBXLIB_FEATURES)
   # List rather than set so that static libaries could,
   # potentially, be passed into this script
   list(APPEND UBXLIB_EXTRA_LIBS geodesic)
+endif()
+# Shortrange second generation AT module
+if (short_range_gen2 IN_LIST UBXLIB_FEATURES)
+  set(GEN2_AT_DIR ${UBXLIB_BASE}/common/short_range/src/gen2/ucxclient)
+  list(APPEND UBXLIB_INC ${GEN2_AT_DIR}/inc ${GEN2_AT_DIR}/ucx_api)
+  u_add_source_dir(base ${GEN2_AT_DIR}/src)
+  u_add_source_dir(base ${GEN2_AT_DIR}/ucx_api)
+  list(APPEND UBXLIB_COMPILE_OPTIONS -DU_UCONNECT_GEN2 -DU_CX_AT_CONFIG_FILE="../../ucx_config.h")
 endif()

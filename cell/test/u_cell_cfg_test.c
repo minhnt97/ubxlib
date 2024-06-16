@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -55,6 +55,8 @@
 #include "u_port_uart.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -136,7 +138,7 @@
 
 /** Used for keepGoingCallback() timeout.
  */
-static int64_t gStopTimeMs;
+static uTimeoutStop_t gTimeoutStop;
 
 /** The GNSS profile bit map.
  */
@@ -157,7 +159,8 @@ static bool keepGoingCallback(uDeviceHandle_t unused)
 
     (void) unused;
 
-    if (uPortGetTickTimeMs() > gStopTimeMs) {
+    if (uTimeoutExpiredMs(gTimeoutStop.timeoutStart,
+                          gTimeoutStop.durationMs)) {
         keepGoing = false;
     }
 
@@ -178,14 +181,15 @@ static void testBandMask(uDeviceHandle_t cellHandle,
     uint64_t originalBandMask2 = 0;
     uint64_t bandMask1;
     uint64_t bandMask2;
+    uint8_t desiredBands[10] = {2, 4, 8, 20};
 
     U_TEST_PRINT_LINE("getting band masks for %s...", pRatString);
     errorCode = uCellCfgGetBandMask(cellHandle, rat,
                                     &originalBandMask1, &originalBandMask2);
-    // For SARA-R4 and LARA-R6 the module reports the band mask for
-    // all of the RATs it supports, while SARA-R5 only reports
-    // the band masks for the RAT that is enabled, which in the
-    // case of these tests is only one, the one at rank 0
+    // For SARA-R4, LARA-R6 and SARA-R52 the module reports the
+    // band mask for all of the RATs it supports, while SARA-R5
+    // only reports the band masks for the RAT that is enabled,
+    // which in the case of these tests is only one, the one at rank 0
     if (((moduleType != U_CELL_MODULE_TYPE_SARA_R5) ||
          (uCellCfgGetRatRank(cellHandle, rat) == 0)) &&
         (supportedRatsBitmap & (1UL << (int32_t) rat))) {
@@ -219,7 +223,7 @@ static void testBandMask(uDeviceHandle_t cellHandle,
 #endif
         U_PORT_TEST_ASSERT(!uCellPwrRebootIsRequired(cellHandle));
         // For SARA-R5 we can only read it back if it is the current RAT
-        if ((moduleType != U_CELL_MODULE_TYPE_SARA_R5) ||
+        if ((!U_CELL_PRIVATE_MODULE_IS_SARA_R5(moduleType)) ||
             (uCellCfgGetRatRank(cellHandle, rat) == 0)) {
             U_TEST_PRINT_LINE("reading new band mask for %s...",
                               pRatString);
@@ -230,6 +234,43 @@ static void testBandMask(uDeviceHandle_t cellHandle,
                               (uint32_t) (bandMask1 >> 32), (uint32_t) bandMask1);
             U_PORT_TEST_ASSERT(bandMask1 == *pBandmask1);
             U_PORT_TEST_ASSERT(bandMask2 == *pBandmask2);
+
+            //Test case 1: The all fine condition, with pre-defined bandmask for testing
+            U_PORT_TEST_ASSERT(uCellCfgSetBands(cellHandle, rat, sizeof(desiredBands) / sizeof(desiredBands[0]),
+                                                desiredBands) == 0);
+
+            //Test case 2: The all fine condition, added the band 66 for bandmask2
+            if (rat == U_CELL_NET_RAT_CATM1) {
+#ifndef U_CELL_CFG_SARA_R5_00B
+                memset(desiredBands, 0, sizeof(desiredBands));
+                desiredBands[0] = 2;
+                desiredBands[1] = 4;
+                desiredBands[2] = 8;
+                desiredBands[4] = 20;
+                desiredBands[5] = 66;
+                U_PORT_TEST_ASSERT(uCellCfgSetBands(cellHandle, rat, 10, desiredBands) == 0);
+#endif
+            }
+            //Test case 3: The null pointer case
+            uint8_t *pTmp = NULL;
+            U_PORT_TEST_ASSERT(uCellCfgSetBands(cellHandle, rat, 6, pTmp) < 0);
+
+            //Test case 4: The invalid band case
+            memset(desiredBands, 0, sizeof(desiredBands));
+            desiredBands[0] = 1;
+            desiredBands[2] = 130;
+            desiredBands[6] = 2;
+            U_PORT_TEST_ASSERT(uCellCfgSetBands(cellHandle, rat, 6, desiredBands) < 0);
+
+            //Test case 5: Disable all bands case (Except for lena R8)
+
+            //Some cellular modules allow to disable the bands and some do not, e.g. SARA_R5 don't
+            //allow to write zero band but LARA R6 allows it.
+            if (moduleType == U_CELL_MODULE_TYPE_LARA_R6) {
+                memset(desiredBands, 0, sizeof(desiredBands));
+                U_PORT_TEST_ASSERT(uCellCfgSetBands(cellHandle, rat,
+                                                    sizeof(desiredBands) / sizeof(desiredBands[0]), desiredBands) == 0);
+            }
             U_TEST_PRINT_LINE("putting original band masks back...");
             U_PORT_TEST_ASSERT(uCellCfgSetBandMask(cellHandle, rat,
                                                    originalBandMask1,
@@ -284,7 +325,7 @@ U_PORT_TEST_FUNCTION("[cellCfg]", "cellCfgBandMask")
     resourceCount = uTestUtilGetDynamicResourceCount();
 
     // Do the standard preamble
-    U_PORT_TEST_ASSERT(uCellTestPrivatePreamble(U_CFG_TEST_CELL_MODULE_TYPE,
+    U_PORT_TEST_ASSERT(uCellTestPrivatePreamble(U_CELL_MODULE_TYPE_ANY,
                                                 &gHandles, true) == 0);
 
     // Get the private module data as we need it for testing
@@ -718,8 +759,8 @@ U_PORT_TEST_FUNCTION("[cellCfg]", "cellCfgGetSetMnoProfile")
     if (U_CELL_PRIVATE_HAS(pModule,
                            U_CELL_PRIVATE_FEATURE_MNO_PROFILE)) {
         U_TEST_PRINT_LINE("trying to set MNO profile while  connected...");
-        gStopTimeMs = uPortGetTickTimeMs() +
-                      (U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000);
+        gTimeoutStop.timeoutStart = uTimeoutStart();
+        gTimeoutStop.durationMs = U_CELL_TEST_CFG_CONNECT_TIMEOUT_SECONDS * 1000;
         U_PORT_TEST_ASSERT(uCellNetRegister(cellHandle, NULL,
                                             keepGoingCallback) == 0);
         U_PORT_TEST_ASSERT(uCellNetIsRegistered(cellHandle));
@@ -766,6 +807,8 @@ U_PORT_TEST_FUNCTION("[cellCfg]", "cellCfgUdconf")
     int32_t x;
     int32_t setUdconf = 0;
     int32_t resourceCount;
+    size_t numParameters = 3;
+    int32_t parameters[5] = {92, 50, -1, 532, -2};
 
     // In case a previous test failed
     uCellTestPrivateCleanup(&gHandles);
@@ -779,24 +822,58 @@ U_PORT_TEST_FUNCTION("[cellCfg]", "cellCfgUdconf")
     cellHandle = gHandles.cellHandle;
 
     // All modules support AT+UDCONF=1 so we can test that safely
-    U_TEST_PRINT_LINE("getting UDCONF=1...");
+    U_TEST_PRINT_LINE("getting UDCONF = 1...");
     udconfOriginal = uCellCfgGetUdconf(cellHandle, 1, -1);
-    U_TEST_PRINT_LINE("UDCONF=1 is %d.", udconfOriginal);
+    U_TEST_PRINT_LINE("UDCONF = 1 is %d.", udconfOriginal);
     U_PORT_TEST_ASSERT((udconfOriginal == 0) || (udconfOriginal == 1));
 
     if (udconfOriginal == 0) {
         setUdconf = 1;
     }
 
-    U_TEST_PRINT_LINE("setting UDCONF=1,%d...", setUdconf);
+    U_TEST_PRINT_LINE("setting UDCONF = 1,%d...", setUdconf);
     U_PORT_TEST_ASSERT(uCellCfgSetUdconf(cellHandle, 1, setUdconf, -1) == 0);
     x = uCellCfgGetUdconf(cellHandle, 1, -1);
-    U_TEST_PRINT_LINE("UDCONF=1 is now %d.", x);
+    U_TEST_PRINT_LINE("UDCONF = 1 is now %d.", x);
     U_PORT_TEST_ASSERT(x == setUdconf);
     U_PORT_TEST_ASSERT(uCellPwrRebootIsRequired(cellHandle));
 
-    U_TEST_PRINT_LINE("putting UDCONF=1 back to what it was...");
+    U_TEST_PRINT_LINE("putting UDCONF = 1 back to what it was...");
     U_PORT_TEST_ASSERT(uCellCfgSetUdconf(cellHandle, 1, udconfOriginal, -1) == 0);
+
+    // Testing for multiple parameters
+    if (U_CFG_TEST_CELL_MODULE_TYPE == U_CELL_MODULE_TYPE_LARA_R6) {
+        U_TEST_PRINT_LINE("getting UDCONF for %d = 92, 50 ...",
+                          U_CELL_MODULE_TYPE_LARA_R6);
+        udconfOriginal = uCellCfgGetUdconf(cellHandle, 92, 50);
+        U_TEST_PRINT_LINE("UDCONF = 92 is %d.", udconfOriginal);
+        U_PORT_TEST_ASSERT((udconfOriginal >= 0) && (udconfOriginal <= 255));
+
+        // Attempting to write a wrong value, it should not be written to module.
+        U_PORT_TEST_ASSERT(uCellCfgSetUdconfMultiParam(cellHandle, numParameters, parameters) <= 0);
+        x = uCellCfgGetUdconf(cellHandle, 92, 50);
+        U_PORT_TEST_ASSERT(x == udconfOriginal);
+
+        // Now trying to write a valid value...
+        if (udconfOriginal == 22) {
+            setUdconf = 24;
+        } else {
+            setUdconf = 22;
+        }
+        parameters[0] = 92;
+        parameters[1] = 50;
+        parameters[2] = setUdconf;
+        U_TEST_PRINT_LINE("setting UDCONF = 92, 50, %d...", parameters[2]);
+        U_PORT_TEST_ASSERT(uCellCfgSetUdconfMultiParam(cellHandle, numParameters, parameters) == 0);
+        x = uCellCfgGetUdconf(cellHandle, 92, 50);
+        U_TEST_PRINT_LINE("UDCONF = 92, 50 is now %d.", x);
+        U_PORT_TEST_ASSERT(x == setUdconf);
+        U_PORT_TEST_ASSERT(uCellPwrRebootIsRequired(cellHandle));
+
+        U_TEST_PRINT_LINE("putting UDCONF = 92, 50 back to what it was...");
+        parameters[2] = udconfOriginal;
+        U_PORT_TEST_ASSERT(uCellCfgSetUdconfMultiParam(cellHandle, numParameters, parameters) == 0);
+    }
 
     // Do the standard postamble, leaving the module on for the next
     // test to speed things up

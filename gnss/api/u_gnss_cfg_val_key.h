@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1594,7 +1594,6 @@ typedef enum {
 #define U_GNSS_CFG_VAL_KEY_ITEM_VALUE_SBAS_PRNSCANMASK_PRN157 0x0000002000000000 /**< enable search for SBAS PRN157. */
 #define U_GNSS_CFG_VAL_KEY_ITEM_VALUE_SBAS_PRNSCANMASK_PRN158 0x0000004000000000 /**< enable search for SBAS PRN158. */
 
-
 /** Item IDs for #U_GNSS_CFG_VAL_KEY_GROUP_ID_SEC.
  */
 typedef enum {
@@ -1731,6 +1730,7 @@ typedef enum {
     U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_BDS_ENA_L       = 0x22, /**< BeiDou enable. */
     U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_BDS_B1_ENA_L    = 0x0d, /**< BeiDou B1. */
     U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_BDS_B2_ENA_L    = 0x0e, /**< BeiDou B2. */
+    U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_BDS_B1C_ENA_L   = 0x0f, /**< BeiDou B1C. */
     U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_QZSS_ENA_L      = 0x24, /**< QZSS enable. */
     U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_QZSS_L1CA_ENA_L = 0x12, /**< QZSS L1C/A. */
     U_GNSS_CFG_VAL_KEY_ITEM_SIGNAL_QZSS_L1S_ENA_L  = 0x14, /**< QZSS L1S. */
@@ -3079,6 +3079,7 @@ typedef enum {
 #define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_BDS_ENA_L                   0x10310022
 #define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_BDS_B1_ENA_L                0x1031000d
 #define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_BDS_B2_ENA_L                0x1031000e
+#define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_BDS_B1C_ENA_L               0x1031000f
 #define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_QZSS_ENA_L                  0x10310024
 #define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_QZSS_L1CA_ENA_L             0x10310012
 #define U_GNSS_CFG_VAL_KEY_ID_SIGNAL_QZSS_L1S_ENA_L              0x10310014

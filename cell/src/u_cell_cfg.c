@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,8 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 
+#include "u_timeout.h"
+
 #include "u_at_client.h"
 
 #include "u_cell_module_type.h"
@@ -68,158 +70,158 @@
  * -------------------------------------------------------------- */
 
 /** Table to convert uCellNetRat_t to the value used in
- * CONFIGURING the module, SARA_U201 form
+ * CONFIGURING the module, SARA_U201 form.
  */
 static const int8_t gCellRatToModuleRatU201[] = {
     -1,  // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        0,   // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1,  // U_CELL_NET_RAT_GSM_COMPACT
-        2,   // U_CELL_NET_RAT_UTRAN: 3G
-        -1,  // U_CELL_NET_RAT_EGPRS
-        -1,  // U_CELL_NET_RAT_HSDPA
-        -1,  // U_CELL_NET_RAT_HSUPA
-        -1,  // U_CELL_NET_RAT_HSDPA_HSUPA
-        -1,  // U_CELL_NET_RAT_LTE
-        -1,  // U_CELL_NET_RAT_EC_GSM
-        -1,  // U_CELL_NET_RAT_CATM1
-        -1,  // U_CELL_NET_RAT_NB1
-        -1,  // U_CELL_NET_RAT_GSM_UMTS
-        -1,  // U_CELL_NET_RAT_GSM_UMTS_LTE
-        -1,  // U_CELL_NET_RAT_GSM_LTE
-        -1   // U_CELL_NET_RAT_UMTS_LTE
-    };
+    0,   // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1,  // U_CELL_NET_RAT_GSM_COMPACT
+    2,   // U_CELL_NET_RAT_UTRAN: 3G
+    -1,  // U_CELL_NET_RAT_EGPRS
+    -1,  // U_CELL_NET_RAT_HSDPA
+    -1,  // U_CELL_NET_RAT_HSUPA
+    -1,  // U_CELL_NET_RAT_HSDPA_HSUPA
+    -1,  // U_CELL_NET_RAT_LTE
+    -1,  // U_CELL_NET_RAT_EC_GSM
+    -1,  // U_CELL_NET_RAT_CATM1
+    -1,  // U_CELL_NET_RAT_NB1
+    -1,  // U_CELL_NET_RAT_GSM_UMTS
+    -1,  // U_CELL_NET_RAT_GSM_UMTS_LTE
+    -1,  // U_CELL_NET_RAT_GSM_LTE
+    -1   // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert uCellNetRat_t to the value used in
  * CONFIGURING the module, SARA-R4/R5 form.
  */
 static const int8_t gCellRatToModuleRatR4R5[] = {
     -1, // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        9,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1, // U_CELL_NET_RAT_GSM_COMPACT
-        -1, // U_CELL_NET_RAT_UTRAN: 3G
-        -1, // U_CELL_NET_RAT_EGPRS
-        -1, // U_CELL_NET_RAT_HSDPA
-        -1, // U_CELL_NET_RAT_HSUPA
-        -1, // U_CELL_NET_RAT_HSDPA_HSUPA
-        -1, // U_CELL_NET_RAT_LTE
-        -1, // U_CELL_NET_RAT_EC_GSM
-        7,  // U_CELL_NET_RAT_CATM1
-        8,  // U_CELL_NET_RAT_NB1
-        -1, // U_CELL_NET_RAT_GSM_UMTS
-        -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
-        -1, // U_CELL_NET_RAT_GSM_LTE
-        -1  // U_CELL_NET_RAT_UMTS_LTE
-    };
+    9,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1, // U_CELL_NET_RAT_GSM_COMPACT
+    -1, // U_CELL_NET_RAT_UTRAN: 3G
+    -1, // U_CELL_NET_RAT_EGPRS
+    -1, // U_CELL_NET_RAT_HSDPA
+    -1, // U_CELL_NET_RAT_HSUPA
+    -1, // U_CELL_NET_RAT_HSDPA_HSUPA
+    -1, // U_CELL_NET_RAT_LTE
+    -1, // U_CELL_NET_RAT_EC_GSM
+    7,  // U_CELL_NET_RAT_CATM1
+    8,  // U_CELL_NET_RAT_NB1
+    -1, // U_CELL_NET_RAT_GSM_UMTS
+    -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
+    -1, // U_CELL_NET_RAT_GSM_LTE
+    -1  // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert uCellNetRat_t to the value used in
  * CONFIGURING the module, LARA-R6 form.
  */
 static const int8_t gCellRatToModuleRatR6[] = {
     -1, // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        0,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1, // U_CELL_NET_RAT_GSM_COMPACT
-        2,  // U_CELL_NET_RAT_UTRAN: 3G
-        -1, // U_CELL_NET_RAT_EGPRS
-        -1, // U_CELL_NET_RAT_HSDPA
-        -1, // U_CELL_NET_RAT_HSUPA
-        -1, // U_CELL_NET_RAT_HSDPA_HSUPA
-        3,  // U_CELL_NET_RAT_LTE
-        -1, // U_CELL_NET_RAT_EC_GSM
-        -1, // U_CELL_NET_RAT_CATM1
-        -1, // U_CELL_NET_RAT_NB1
-        -1, // U_CELL_NET_RAT_GSM_UMTS
-        -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
-        -1, // U_CELL_NET_RAT_GSM_LTE
-        -1  // U_CELL_NET_RAT_UMTS_LTE
-    };
+    0,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1, // U_CELL_NET_RAT_GSM_COMPACT
+    2,  // U_CELL_NET_RAT_UTRAN: 3G
+    -1, // U_CELL_NET_RAT_EGPRS
+    -1, // U_CELL_NET_RAT_HSDPA
+    -1, // U_CELL_NET_RAT_HSUPA
+    -1, // U_CELL_NET_RAT_HSDPA_HSUPA
+    3,  // U_CELL_NET_RAT_LTE
+    -1, // U_CELL_NET_RAT_EC_GSM
+    -1, // U_CELL_NET_RAT_CATM1
+    -1, // U_CELL_NET_RAT_NB1
+    -1, // U_CELL_NET_RAT_GSM_UMTS
+    -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
+    -1, // U_CELL_NET_RAT_GSM_LTE
+    -1  // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert uCellNetRat_t to the value used in
  * CONFIGURING the module, LENA-R8 form.
  */
 static const int8_t gCellRatToModuleRatR8[] = {
     -1, // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        0,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1, // U_CELL_NET_RAT_GSM_COMPACT
-        2,  // U_CELL_NET_RAT_UTRAN: 3G
-        -1, // U_CELL_NET_RAT_EGPRS
-        -1, // U_CELL_NET_RAT_HSDPA
-        -1, // U_CELL_NET_RAT_HSUPA
-        -1, // U_CELL_NET_RAT_HSDPA_HSUPA
-        3,  // U_CELL_NET_RAT_LTE
-        -1, // U_CELL_NET_RAT_EC_GSM
-        -1, // U_CELL_NET_RAT_CATM1
-        -1, // U_CELL_NET_RAT_NB1
-        1,  // U_CELL_NET_RAT_GSM_UMTS
-        4,  // U_CELL_NET_RAT_GSM_UMTS_LTE
-        5,  // U_CELL_NET_RAT_GSM_LTE
-        6   // U_CELL_NET_RAT_UMTS_LTE
-    };
+    0,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1, // U_CELL_NET_RAT_GSM_COMPACT
+    2,  // U_CELL_NET_RAT_UTRAN: 3G
+    -1, // U_CELL_NET_RAT_EGPRS
+    -1, // U_CELL_NET_RAT_HSDPA
+    -1, // U_CELL_NET_RAT_HSUPA
+    -1, // U_CELL_NET_RAT_HSDPA_HSUPA
+    3,  // U_CELL_NET_RAT_LTE
+    -1, // U_CELL_NET_RAT_EC_GSM
+    -1, // U_CELL_NET_RAT_CATM1
+    -1, // U_CELL_NET_RAT_NB1
+    1,  // U_CELL_NET_RAT_GSM_UMTS
+    4,  // U_CELL_NET_RAT_GSM_UMTS_LTE
+    5,  // U_CELL_NET_RAT_GSM_LTE
+    6   // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert uCellNetRat_t to the value used in
  * setting the bandmask, SARA-R4/R5 form.
  */
 static const int8_t gCellRatToModuleRatBandMaskR4R5[] = {
     -1, // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        -1,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1, // U_CELL_NET_RAT_GSM_COMPACT
-        -1, // U_CELL_NET_RAT_UTRAN: 3G
-        -1, // U_CELL_NET_RAT_EGPRS
-        -1, // U_CELL_NET_RAT_HSDPA
-        -1, // U_CELL_NET_RAT_HSUPA
-        -1, // U_CELL_NET_RAT_HSDPA_HSUPA
-        -1, // U_CELL_NET_RAT_LTE
-        -1, // U_CELL_NET_RAT_EC_GSM
-        0,  // U_CELL_NET_RAT_CATM1
-        1,  // U_CELL_NET_RAT_NB1
-        -1, // U_CELL_NET_RAT_GSM_UMTS
-        -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
-        -1, // U_CELL_NET_RAT_GSM_LTE
-        -1  // U_CELL_NET_RAT_UMTS_LTE
-    };
+    -1,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1, // U_CELL_NET_RAT_GSM_COMPACT
+    -1, // U_CELL_NET_RAT_UTRAN: 3G
+    -1, // U_CELL_NET_RAT_EGPRS
+    -1, // U_CELL_NET_RAT_HSDPA
+    -1, // U_CELL_NET_RAT_HSUPA
+    -1, // U_CELL_NET_RAT_HSDPA_HSUPA
+    -1, // U_CELL_NET_RAT_LTE
+    -1, // U_CELL_NET_RAT_EC_GSM
+    0,  // U_CELL_NET_RAT_CATM1
+    1,  // U_CELL_NET_RAT_NB1
+    -1, // U_CELL_NET_RAT_GSM_UMTS
+    -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
+    -1, // U_CELL_NET_RAT_GSM_LTE
+    -1  // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert uCellNetRat_t to the value used in
  * setting the bandmask, LARA-R6 form.
  */
 static const int8_t gCellRatToModuleRatBandMaskR6[] = {
     -1, // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        2,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1, // U_CELL_NET_RAT_GSM_COMPACT
-        2,  // U_CELL_NET_RAT_UTRAN: 3G
-        -1, // U_CELL_NET_RAT_EGPRS
-        -1, // U_CELL_NET_RAT_HSDPA
-        -1, // U_CELL_NET_RAT_HSUPA
-        -1, // U_CELL_NET_RAT_HSDPA_HSUPA
-        3,  // U_CELL_NET_RAT_LTE
-        -1, // U_CELL_NET_RAT_EC_GSM
-        -1, // U_CELL_NET_RAT_CATM1
-        -1, // U_CELL_NET_RAT_NB1
-        -1, // U_CELL_NET_RAT_GSM_UMTS
-        -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
-        -1, // U_CELL_NET_RAT_GSM_LTE
-        -1  // U_CELL_NET_RAT_UMTS_LTE
-    };
+    2,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1, // U_CELL_NET_RAT_GSM_COMPACT
+    2,  // U_CELL_NET_RAT_UTRAN: 3G
+    -1, // U_CELL_NET_RAT_EGPRS
+    -1, // U_CELL_NET_RAT_HSDPA
+    -1, // U_CELL_NET_RAT_HSUPA
+    -1, // U_CELL_NET_RAT_HSDPA_HSUPA
+    3,  // U_CELL_NET_RAT_LTE
+    -1, // U_CELL_NET_RAT_EC_GSM
+    -1, // U_CELL_NET_RAT_CATM1
+    -1, // U_CELL_NET_RAT_NB1
+    -1, // U_CELL_NET_RAT_GSM_UMTS
+    -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
+    -1, // U_CELL_NET_RAT_GSM_LTE
+    -1  // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert uCellNetRat_t to the value used in
  * setting the bandmask, LENA-R8 form.
  */
 static const int8_t gCellRatToModuleRatBandMaskR8[] = {
     -1, // Dummy value for U_CELL_NET_RAT_UNKNOWN_OR_NOT_USED
-        0,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
-        -1, // U_CELL_NET_RAT_GSM_COMPACT
-        2,  // U_CELL_NET_RAT_UTRAN: 3G
-        -1, // U_CELL_NET_RAT_EGPRS
-        -1, // U_CELL_NET_RAT_HSDPA
-        -1, // U_CELL_NET_RAT_HSUPA
-        -1, // U_CELL_NET_RAT_HSDPA_HSUPA
-        3,  // U_CELL_NET_RAT_LTE
-        -1, // U_CELL_NET_RAT_EC_GSM
-        -1, // U_CELL_NET_RAT_CATM1
-        -1, // U_CELL_NET_RAT_NB1
-        -1, // U_CELL_NET_RAT_GSM_UMTS
-        -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
-        -1, // U_CELL_NET_RAT_GSM_LTE
-        -1  // U_CELL_NET_RAT_UMTS_LTE
-    };
+    0,  // U_CELL_NET_RAT_GSM_GPRS_EGPRS: 2G
+    -1, // U_CELL_NET_RAT_GSM_COMPACT
+    2,  // U_CELL_NET_RAT_UTRAN: 3G
+    -1, // U_CELL_NET_RAT_EGPRS
+    -1, // U_CELL_NET_RAT_HSDPA
+    -1, // U_CELL_NET_RAT_HSUPA
+    -1, // U_CELL_NET_RAT_HSDPA_HSUPA
+    3,  // U_CELL_NET_RAT_LTE
+    -1, // U_CELL_NET_RAT_EC_GSM
+    -1, // U_CELL_NET_RAT_CATM1
+    -1, // U_CELL_NET_RAT_NB1
+    -1, // U_CELL_NET_RAT_GSM_UMTS
+    -1, // U_CELL_NET_RAT_GSM_UMTS_LTE
+    -1, // U_CELL_NET_RAT_GSM_LTE
+    -1  // U_CELL_NET_RAT_UMTS_LTE
+};
 
 /** Table to convert the RAT values used in the
  * module while reading the bandmask to uCellNetRat_t,
@@ -481,7 +483,7 @@ static int32_t getRatRankSaraU2(uCellPrivateInstance_t *pInstance,
         errorCodeOrRank = (int32_t) U_CELL_ERROR_NOT_FOUND;
         // If the first mode is 1, dual mode, then there MUST be a second
         // number which indicates the preference
-        // If the RAT being asked for is 2G or 3G then if it in this
+        // If the RAT being asked for is 2G or 3G then if it is in this
         // second number it is at rank 0, else it must by implication
         // be at rank 1
         if ((rat == U_CELL_NET_RAT_GSM_GPRS_EGPRS) || (rat == U_CELL_NET_RAT_UTRAN)) {
@@ -583,30 +585,47 @@ static int32_t setRatRankSaraU2(uCellPrivateInstance_t *pInstance,
         if ((modes[0] >= 0) && (modes[1] >= 0)) {
             // ...and we already have dual mode...
             if (rank == 0) {
-                // ...and we are setting the first rank,
-                // then set the preference in the second number
-                modes[1] = cellRatToModuleRat(pInstance->pModule->moduleType, rat);
-                validOperation = true;
+                // ...and we are setting the top rank...
+                if (rat != uCellPrivateModuleRatToCellRat(pInstance->pModule->moduleType, modes[1])) {
+                    // ...then if we are setting the RAT to the
+                    // same as the current dual-mode non-preferred
+                    // RAT, switch to single-mode and that RAT.
+                    modes[0] = cellRatToModuleRat(pInstance->pModule->moduleType, rat);
+                    modes[1] = -1;
+                    validOperation = true;
+                } else {
+                    // ...else leave things as they are.
+                    validOperation = true;
+                }
             } else if (rank == 1) {
-                // ...otherwise if we are setting the second
-                // rank then we want to set the OPPOSITE of
-                // the desired RAT in the second number.
-                // In other words, to put 2G at rank 1, we
-                // need to set 3G as our preferred RAT.
-                if (rat == U_CELL_NET_RAT_GSM_GPRS_EGPRS) {
-                    modes[1] = cellRatToModuleRat(pInstance->pModule->moduleType,
-                                                  U_CELL_NET_RAT_UTRAN);
+                // ...and we are setting the second rank...
+                if (rat == uCellPrivateModuleRatToCellRat(pInstance->pModule->moduleType, modes[1])) {
+                    // ...and the RAT we are setting is also the first rank,
+                    // then switch to single mode with that RAT.
+                    modes[0] = cellRatToModuleRat(pInstance->pModule->moduleType, rat);
+                    modes[1] = -1;
                     validOperation = true;
-                } else if (rat == U_CELL_NET_RAT_UTRAN) {
-                    modes[1] = cellRatToModuleRat(pInstance->pModule->moduleType,
-                                                  U_CELL_NET_RAT_GSM_GPRS_EGPRS);
-                    validOperation = true;
+                } else {
+                    // ...otherwise if we are setting the second
+                    // rank then we want to set the OPPOSITE of
+                    // the desired RAT in the preferred RAT position.
+                    // In other words, to put 2G in second rank, we
+                    // need to set 3G as our preferred RAT.
+                    if (rat == U_CELL_NET_RAT_GSM_GPRS_EGPRS) {
+                        modes[1] = cellRatToModuleRat(pInstance->pModule->moduleType,
+                                                      U_CELL_NET_RAT_UTRAN);
+                        validOperation = true;
+                    } else if (rat == U_CELL_NET_RAT_UTRAN) {
+                        modes[1] = cellRatToModuleRat(pInstance->pModule->moduleType,
+                                                      U_CELL_NET_RAT_GSM_GPRS_EGPRS);
+                        validOperation = true;
+                    }
                 }
             }
         } else if ((modes[0] >= 0) && (modes[1] < 0)) {
             // ...and we are in single mode...
             if (rank == 0) {
-                // ...then if we are setting rank 0 just set it
+                // ...then if we are setting rank 0 just set it.
                 modes[0] = cellRatToModuleRat(pInstance->pModule->moduleType, rat);
                 validOperation = true;
             } else if (rank == 1) {
@@ -628,7 +647,7 @@ static int32_t setRatRankSaraU2(uCellPrivateInstance_t *pInstance,
                         validOperation = true;
                     }
                 } else {
-                    // ...else leave things as they are
+                    // ...else leave things as they are.
                     validOperation = true;
                 }
             }
@@ -642,7 +661,7 @@ static int32_t setRatRankSaraU2(uCellPrivateInstance_t *pInstance,
                 // If are removing the top-most rank
                 // then we set the single mode to be
                 // the opposite of the currently
-                // preferred RAT
+                // preferred RAT.
                 if (uCellPrivateModuleRatToCellRat(pInstance->pModule->moduleType, modes[1]) ==
                     U_CELL_NET_RAT_GSM_GPRS_EGPRS) {
                     modes[0] = cellRatToModuleRat(pInstance->pModule->moduleType,
@@ -787,7 +806,7 @@ static int32_t setRatSaraRx(uCellPrivateInstance_t *pInstance,
     uAtClientHandle_t atHandle = pInstance->atHandle;
     int32_t cFunMode = -1;
 
-    if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+    if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
         // For SARA-R5 the module has to be in state AT+CFUN=0
         cFunMode = uCellPrivateCFunGet(pInstance);
         if (cFunMode != 0) {
@@ -850,7 +869,7 @@ static int32_t setRatRankSaraRx(uCellPrivateInstance_t *pInstance,
         }
     }
 
-    if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+    if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
         // For SARA-R5 the module has to be in state AT+CFUN=0
         cFunMode = uCellPrivateCFunGet(pInstance);
         if (cFunMode != 0) {
@@ -988,7 +1007,7 @@ static int32_t addGreetingUrc(uCellPrivateInstance_t *pInstance,
 {
     int32_t errorCode;
     // +1 for terminator, +2 for the SARA-R41X workaround
-    char buffer[U_CELL_CFG_GREETING_CALLBACK_MAX_LEN_BYTES + 1 + 2];
+    char buffer[U_CELL_CFG_GREETING_CALLBACK_MAX_LEN_BYTES + 1 + 2] = {0};
 
     if (U_CELL_PRIVATE_MODULE_IS_SARA_R41X(pInstance->pModule->moduleType)) {
         // This is necessary since SARA-R41X modules add an odd set of
@@ -999,7 +1018,7 @@ static int32_t addGreetingUrc(uCellPrivateInstance_t *pInstance,
         // the AT client will remove the null itself, and will also strip
         // any CR/LF (0d 0a), so we need URC handlers for 0a 0d <URC> and 0d <URC>.
         // Shuffle everything in the buffer up by two
-        strncpy(buffer + 2, pStr, sizeof(buffer) - 2);
+        strncpy(buffer + 2, pStr, sizeof(buffer) - 3);
         // Add LF/CR at the start
         buffer[0] = 0x0a;
         buffer[1] = 0x0d;
@@ -1023,11 +1042,11 @@ static void removeGreetingUrc(uCellPrivateInstance_t *pInstance,
                               const char *pStr)
 {
     // +1 for terminator, +2 for the SARA-R41X workaround
-    char buffer[U_CELL_CFG_GREETING_CALLBACK_MAX_LEN_BYTES + 1 + 2];
+    char buffer[U_CELL_CFG_GREETING_CALLBACK_MAX_LEN_BYTES + 1 + 2] = {0};
 
     if (U_CELL_PRIVATE_MODULE_IS_SARA_R41X(pInstance->pModule->moduleType)) {
         // Same reasoning as for addGreetingUrc()
-        strncpy(buffer + 2, pStr, sizeof(buffer) - 2);
+        strncpy(buffer + 2, pStr, sizeof(buffer) - 3);
         // Add LF/CR at the start
         buffer[0] = 0x0a;
         buffer[1] = 0x0d;
@@ -1073,6 +1092,43 @@ static int32_t setAndStoreBaudRate(const uCellPrivateInstance_t *pInstance,
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS
  * -------------------------------------------------------------- */
+
+// Set the bands to be used by the cellular module: building the bandmask itself.
+int32_t uCellCfgSetBands(uDeviceHandle_t cellHandle,
+                         uCellNetRat_t rat,
+                         size_t numBands,
+                         uint8_t *pBands)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+    uint64_t bandMask1 = 0;
+    uint64_t bandMask2 = 0;
+    bool isValid = true;
+
+    if (pBands != NULL) {
+        for (size_t i = 0; i < numBands; i++) {
+            if (pBands[i] > 0) { //Valid band
+                if (pBands[i] <= 64) { //Populate Bandmask 1
+                    //subtracting 1 is due to the fact that band 1 maps on bit 0 and band 64 to bit 63
+                    bandMask1 |= 1ULL << ((pBands[i]) - 1);
+
+                } else if ((pBands[i] > 64) && (pBands[i] <= 128)) { //Populate bandmask 2
+                    //subtracting 1 is due to the fact that band 1 maps on bit 0
+                    bandMask2 |= 1ULL << ((pBands[i] - (sizeof(uint64_t) * 8)) - 1);
+                } else {
+                    uPortLog("U_CELL_CFG: invalid band: %d at location %d in the array.\n", pBands[i], i);
+                    isValid = false;
+                }
+            }
+        }
+    } else {
+        isValid = false;
+    }
+    if (isValid) {
+        errorCode = uCellCfgSetBandMask(cellHandle, rat, bandMask1, bandMask2);
+    }
+
+    return errorCode;
+}
 
 // Set the bands to be used by the cellular module.
 int32_t uCellCfgSetBandMask(uDeviceHandle_t cellHandle,
@@ -1708,11 +1764,39 @@ int32_t uCellCfgGetActiveSerialInterface(uDeviceHandle_t cellHandle)
 
 // Set "AT+UDCONF".
 int32_t uCellCfgSetUdconf(uDeviceHandle_t cellHandle, int32_t param1,
-                          int32_t param2,  int32_t param3)
+                          int32_t param2, int32_t param3)
+{
+    int32_t errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+    size_t numParameters = 0;
+    int32_t parameters[3] = {0};
+
+    if ((param1 >= 0) && (param2 >= 0)) {
+        numParameters = 2;
+        parameters[0] = param1;
+        parameters[1] = param2;
+        // Check for the optional parameter.
+        if (param3 >= 0) {
+            numParameters++;
+            parameters[2] = param3;
+        }
+
+        errorCode = uCellCfgSetUdconfMultiParam(cellHandle, numParameters,
+                                                parameters);
+    }
+
+    return errorCode;
+}
+
+// Allows to set multiple parameters by "AT+UDCONF".
+int32_t uCellCfgSetUdconfMultiParam(uDeviceHandle_t cellHandle,
+                                    size_t numParameters,
+                                    int32_t *pParameters)
+
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
     uCellPrivateInstance_t *pInstance;
     uAtClientHandle_t atHandle;
+    bool isParamValid = true;
 
     if (gUCellPrivateMutex != NULL) {
 
@@ -1720,19 +1804,26 @@ int32_t uCellCfgSetUdconf(uDeviceHandle_t cellHandle, int32_t param1,
 
         pInstance = pUCellPrivateGetInstance(cellHandle);
         errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
-        if ((pInstance != NULL) && (param1 >= 0) && (param2 >= 0)) {
+        if ((pInstance != NULL) &&
+            (pParameters != NULL) &&
+            (numParameters >= 2)) {
             atHandle = pInstance->atHandle;
             uAtClientLock(atHandle);
             uAtClientCommandStart(atHandle, "AT+UDCONF=");
-            uAtClientWriteInt(atHandle, param1);
-            uAtClientWriteInt(atHandle, param2);
-            if (param3 >= 0) {
-                uAtClientWriteInt(atHandle, param3);
+            for (size_t i = 0; ((i < numParameters) && isParamValid); i++) {
+                if (pParameters[i] >= 0) {
+                    uAtClientWriteInt(atHandle, pParameters[i]);
+                } else {
+                    isParamValid = false;
+                }
             }
             uAtClientCommandStopReadResponse(atHandle);
             errorCode = uAtClientUnlock(atHandle);
             if (errorCode == 0) {
                 pInstance->rebootIsRequired = true;
+            }
+            if (isParamValid == false) {
+                errorCode = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
             }
         }
 
@@ -1767,7 +1858,7 @@ int32_t uCellCfgGetUdconf(uDeviceHandle_t cellHandle, int32_t param1,
                 uAtClientWriteInt(atHandle, param2);
                 // If we're writing a second parameter it
                 // will be echoed back at us so we need to
-                // skip it there
+                // skip it there.
                 skip++;
             }
             uAtClientCommandStop(atHandle);
@@ -2144,6 +2235,8 @@ int64_t uCellCfgSetTime(uDeviceHandle_t cellHandle, int64_t timeLocal,
         // The format is "yy/MM/dd,hh:mm:ss+TZ" where +TZ is
         // in quarter hours.  First get the time in a struct
         if ((pInstance != NULL) && gmtime_r((const time_t *) &timeLocal, &tmStruct) != NULL) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
             int32_t ignored = snprintf(buffer, sizeof(buffer), "%02d/%02d/%02d,%02d:%02d:%02d%c%02d",
                                        tmStruct.tm_year % 100, tmStruct.tm_mon + 1, tmStruct.tm_mday,
                                        tmStruct.tm_hour, tmStruct.tm_min, tmStruct.tm_sec,
@@ -2151,6 +2244,7 @@ int64_t uCellCfgSetTime(uDeviceHandle_t cellHandle, int64_t timeLocal,
                                        timeZoneSeconds >= 0 ? (int) timeZoneSeconds / (15 * 60) : (int) - timeZoneSeconds / (15 * 60));
             // This to stop GCC 12.3.0 complaining that variables printed into buffer are being truncated
             (void) ignored;
+#pragma GCC diagnostic pop
             atHandle = pInstance->atHandle;
             uAtClientLock(atHandle);
             uAtClientCommandStart(atHandle, "AT+CCLK=");

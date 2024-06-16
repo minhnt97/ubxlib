@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -126,7 +126,6 @@ typedef struct {
 typedef void (*uWifiScanResultCallback_t) (uDeviceHandle_t devHandle,
                                            uWifiScanResult_t *pResult);
 
-
 /** Connection status callback type.
  *
  * @param devHandle              the handle of the wifi instance.
@@ -147,7 +146,6 @@ typedef void (*uWifiConnectionStatusCallback_t) (uDeviceHandle_t devHandle,
                                                  char *pBssid,
                                                  int32_t disconnectReason,
                                                  void *pCallbackParameter);
-
 
 /** Network status callback type.
  *

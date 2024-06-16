@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,11 +39,19 @@
  * TYPES
  * -------------------------------------------------------------- */
 
+/* IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT
+ *
+ * NOTE TO MAINTAINERS: if you change this enum you will need to
+ * change u-blox,ubxlib-device-cellular.yaml over in
+ * /port/platform/zephyr/dts/bindings to match.
+ */
 /** The possible types of cellular module.
+ *
  * Note: if you add a new module type here, check the
  * U_CELL_PRIVATE_MODULE_xxx macros in u_cell_private.h
  * to see if they need updating and also update the
- * tables in u_cell_private.c and u_cell_sock_test.c.
+ * tables in u_cell_private.c, u_cell_sock_test.c and
+ * u_cell_pwr.c.
  */
 //lint -estring(788, uCellModuleType_t::U_CELL_MODULE_TYPE_MAX_NUM)
 // Suppress not used within defaulted switch
@@ -66,7 +74,8 @@ typedef enum {
     U_CELL_MODULE_TYPE_SARA_R412M_03B = 3, /**< this module designation never made it
                                                 to mass production and hence is no
                                                 longer tested. */
-    U_CELL_MODULE_TYPE_SARA_R5 = 4,
+    U_CELL_MODULE_TYPE_SARA_R5 = 4,        /**< this is SARA-R51x: see also
+                                                #U_CELL_MODULE_TYPE_SARA_R52. */
     U_CELL_MODULE_TYPE_SARA_R410M_03B = 5, /**< as for the R410M-x2B modules, the
                                                 difference between the R410M-x3B
                                                 module flavours (the "x") is band
@@ -81,6 +90,18 @@ typedef enum {
     U_CELL_MODULE_TYPE_SARA_R422 = 6,
     U_CELL_MODULE_TYPE_LARA_R6 = 7,
     U_CELL_MODULE_TYPE_LENA_R8 = 8,
+    U_CELL_MODULE_TYPE_SARA_R52 = 9,
+    // Add any new module types here, before U_CELL_MODULE_TYPE_ANY, assigning
+    // them to specific values.
+    // IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT: see note above.
+    U_CELL_MODULE_TYPE_ANY, /**< when this module type is used the code will
+                                 interrogate the module and chose the correct
+                                 module type by itself; should this fail, for
+                                 example because you are using a module type which
+                                 is sufficiently close to a supported module type
+                                 to work but the ID string it returns is too
+                                 different to be detected, then you should chose
+                                 the specific module type you want instead. */
     U_CELL_MODULE_TYPE_MAX_NUM
 } uCellModuleType_t;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@
 #include "stdbool.h"
 
 #include "u_port_os.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -84,20 +86,39 @@ const uShortRangePrivateModule_t gUShortRangePrivateModuleList[] = {
         5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
     },
     {
+        U_SHORT_RANGE_MODULE_TYPE_NINA_B4,
+        (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_GATT_SERVER) /* features */,
+        5 /* Boot wait */, 5 /* Min awake */,
+        5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
+    },
+    {
         U_SHORT_RANGE_MODULE_TYPE_NINA_W13,
-        (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_HTTP_CLIENT) /* features */,
+        ((1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_HTTP_CLIENT)         |
+         (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_LOCATION_WIFI)       |
+         (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_WIFI_CAPTIVE_PORTAL)) /* features */,
         5 /* Boot wait */, 5 /* Min awake */,
         5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
     },
     {
         U_SHORT_RANGE_MODULE_TYPE_NINA_W15,
-        ((1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_GATT_SERVER) |
-         (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_HTTP_CLIENT)) /* features */,
+        ((1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_GATT_SERVER)         |
+         (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_HTTP_CLIENT)         |
+         (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_LOCATION_WIFI)       |
+         (1UL << (int32_t) U_SHORT_RANGE_PRIVATE_FEATURE_WIFI_CAPTIVE_PORTAL)) /* features */,
         5 /* Boot wait */, 5 /* Min awake */,
         5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
     },
     {
         U_SHORT_RANGE_MODULE_TYPE_ODIN_W2,
+        0  /* features */,
+        5 /* Boot wait */, 5 /* Min awake */,
+        5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,
+    },
+    // Add new module types here, before the U_SHORT_RANGE_MODULE_TYPE_ANY entry.
+    {
+        // The module attributes set here should be such that they help in identifying
+        // the actual module type.
+        U_SHORT_RANGE_MODULE_TYPE_ANY,
         0  /* features */,
         5 /* Boot wait */, 5 /* Min awake */,
         5 /* Pwr down wait */, 5 /* Reboot wait */, 10 /* AT timeout */,

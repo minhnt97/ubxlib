@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -173,6 +173,10 @@ typedef enum {
  * Note: if this is ever updated don't forget to update
  * #U_COMMON_SPI_CONTROLLER_DEVICE_DEFAULTS and
  * #U_COMMON_SPI_CONTROLLER_DEVICE_INDEX_DEFAULTS to match.
+ *
+ * You may also need to change u-blox,ubxlib-device-gnss.yaml over in
+ * /port/platform/zephyr/dts/bindings to match along with the code
+ * in the Zephyr u_port_board_cfg.c file that parses the values.
  */
 typedef struct {
     int32_t pinSelect;              /**< the pin that should be toggled to select

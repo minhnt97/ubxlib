@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -154,7 +154,6 @@ typedef struct {
         spsWriteEvt_t spsWrite;
     };
 } gattEvt_t;
-
 
 /* ----------------------------------------------------------------
  * STATIC PROTOTYPES
@@ -733,7 +732,7 @@ static int32_t remoteWritesCreditCcc(int32_t gapConnHandle, const void *pBuf, ui
 static bool parseSpsCccWriteData(spsWriteEvt_t *evt, uint16_t *data)
 {
     if ((evt->length == 2) && (evt->offset == 0)) {
-        *data = evt->data[0] | (evt->data[1] << 8);
+        *data = evt->data[0] | (uint16_t) (evt->data[1] << 8);
         return true;
     }
     return false;
@@ -807,7 +806,7 @@ U_PORT_TEST_FUNCTION("[portGatt]", "portGattMisc")
 
         gapParams.scanInterval = 100;
         gapParams.scanWindow = 100;
-        gapParams.createConnectionTmo = 3000;
+        gapParams.createConnectionTimeout = 3000;
 
         gapParams.connIntervalMin = 10;
         gapParams.connIntervalMax = 20;

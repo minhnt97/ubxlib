@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,16 +20,22 @@
 /* Only bring in #includes specifically related to the test framework. */
 
 /* These inclusions required to get the UART CTS/RTS pin assignments
- * from the Zephyr device tree.
+ * from the Zephyr device tree when compiling the ubxlib test code;
+ * NONE of the parameters here are compiled into ubxlib itself.
+ *
  * Note that the pin numbers used below should be those of the MCU:
  * if you are using an MCU inside a u-blox module the IO pin numbering
  * for the module is likely different to that from the MCU: check the
  * data sheet for the module to determine the mapping.
  */
-#include "devicetree.h"
+#include <version.h> // For KERNEL_VERSION_MAJOR
+#if KERNEL_VERSION_NUMBER >= ZEPHYR_VERSION(3,1,0)
+#include <zephyr/devicetree.h>
+#else
+#include <devicetree.h>
+#endif
 #include "u_runner.h"
 #include "u_port_clib_platform_specific.h" // For rand
-#include "version.h" // For KERNEL_VERSION_MAJOR
 
 /** @file
  * @brief Porting layer and configuration items passed in at application
@@ -44,7 +50,6 @@
  */
 #define U_PORT_TEST_ASSERT(condition) U_PORT_UNITY_TEST_ASSERT(condition)
 #define U_PORT_TEST_ASSERT_EQUAL(expected, actual) U_PORT_UNITY_TEST_ASSERT_EQUAL(expected, actual)
-
 
 /** Macro to wrap the definition of a test function and
  * map it to our Unity port.
@@ -136,22 +141,32 @@
 #include "u_cfg_test_platform_specific_sparkfun_asset_tracker_nrf52840.h"
 #endif
 
+#ifdef CONFIG_BOARD_NUCLEO_F767ZI
+#include "u_cfg_test_platform_specific_nucleo_f767zi.h"
+#endif
+
+#ifdef CONFIG_BOARD_NUCLEO_U575ZI_Q
+#include "u_cfg_test_platform_specific_nucleo_u575zi_q.h"
+#endif
+
 #ifdef CONFIG_BOARD_NATIVE_POSIX
 #include "u_cfg_test_platform_specific_native_posix.h"
 #endif
 
-#if defined(CONFIG_BOARD_UBX_EVKNORAB1_NRF5340_CPUAPP) || \
-    defined(CONFIG_BOARD_NRF5340PDK_NRF5340_CPUAPP)    || \
-    defined(CONFIG_BOARD_NRF5340DK_NRF5340_CPUAPP)
+#ifndef U_CFG_TEST_UART_A
+# if defined(CONFIG_BOARD_UBX_EVKNORAB1_NRF5340_CPUAPP) || \
+     defined(CONFIG_BOARD_NRF5340PDK_NRF5340_CPUAPP)    || \
+     defined(CONFIG_BOARD_NRF5340DK_NRF5340_CPUAPP)
 /** UART HW block for UART driver loopback testing on nRF53.
  */
-# ifndef U_CFG_TEST_UART_A
 #  define U_CFG_TEST_UART_A          3
-# endif
-#else
+# elif defined(CONFIG_BOARD_NUCLEO_F767ZI)
+/** UART HW block for UART driver loopback testing on STM32F767ZI.
+ */
+#  define U_CFG_TEST_UART_A          2
+# else
 /** UART HW block for UART driver loopback testing on everything else.
  */
-# ifndef U_CFG_TEST_UART_A
 #  define U_CFG_TEST_UART_A          1
 # endif
 #endif

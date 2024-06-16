@@ -20,14 +20,15 @@ If your platform is not currently supported you may be able to port it yourself,
   - the [UART API](api/u_port_uart.h) will likely be the most complex thing to implement; you will probably need to know details of the interrupt and DMA behaviours of your MCU to complete this,
   - if you intend to use a GNSS chip connected directly to your MCU via I2C then you will need to port the [I2C API](api/u_port_i2c.h),
   - if you intend to use a GNSS chip connected directly to your MCU through SPI then you will need to port the [SPI API](api/u_port_spi.h),
-  - some [crypto](api/u_port_crypto.h) functions are required if you want to use the security features in `ubxlib`; in our experience these are almost always provided by [mbedTLS](https://www.trustedfirmware.org/projects/mbed-tls/), in which case no modification to the existing port will be required (excepting differences arising from future [mbedTLS](https://www.trustedfirmware.org/projects/mbed-tls/) versions, e.g. we have not yet integrated with version 3),
   - if you intend to use the BLE that is on-chip, inside the same host MCU as `ubxlib` is running, you will require an implementation of the [GATT](api/u_port_gatt.h) access functions,
   - if your platform does not use [newlib](https://sourceware.org/newlib/) (if you are using GCC it will bring [newlib](https://sourceware.org/newlib/) with it) then you may find you are missing some C library functions; implementations of C library functions we have already found to be missing on some platforms can be found in [port/clib](/port/clib) and can just be hooked-in from there but you may need to add more if your code doesn't compile,
   - if your platform does not offer `malloc()` and `free()`, or you wish to do your own thing with heap memory, you should override the default, weakly-linked, implementations of `pUPortMalloc()` and `uPortFree()` by defining your own implementations of [these functions](/port/api/u_port_heap.h) in a file inside the `src` directory of your port,
-  - if your platform supports setting a time-zone offset you will need to implement `uPortGetTimezoneOffsetSeconds()`; if not then you may simply include the file [port/u_port_timezone.c](/port/u_port_timezone.c) in your build (already included through weak linkage via [ubxlib.cmake](ubxlib.cmake) and [ubxlib.mk](ubxlib.mk)) to get a default timezone offset of zero.
+  - if your platform supports setting a time-zone offset you will need to implement `uPortGetTimezoneOffsetSeconds()`; if not then you may simply include the file [port/u_port_timezone.c](/port/u_port_timezone.c) in your build (already included through weak linkage via [ubxlib.cmake](ubxlib.cmake) and [ubxlib.mk](ubxlib.mk)) to get a default timezone offset of zero,
+  - if your platform has some form of compile-time device configuration mechanism of its own (like the Zephyr Device Tree) then you may wish to implement `uPortBoardCfgDevice()` and `uPortBoardCfgNetwork()` (see [port/api/u_port_board_cfg.h](/port/api/u_port_board_cfg.h)) to accommodate that,
+  - if you wish to test BLE bonding then you should implement the [named pipe API](api/u_port_named_pipe.h); if not then you may simply include the file [port/u_port_named_pipe.c](/port/u_port_named_pipe.c) in your build (already included through weak linkage via [ubxlib.cmake](ubxlib.cmake) and [ubxlib.mk](ubxlib.mk)) to get a default implementation that returns `U_ERROR_COMMON_NOT_SUPPORTED`.
 - provide your own versions of the header files `u_cfg_app_platform_specific.h`, `u_cfg_hw_platform_specific.h`, `u_cfg_test_platform_specific.h` and `u_cfg_os_platform_specific.h` (see examples in the existing platform directories); take particular note of translating the task priority values into those of your OS,
 - provide your own build metadata files (for CMake, Make, a home-grown Python lash-up, whatever): usually your chosen platform will dictate the shape of these and you just need to add to your existing structure the paths to the `ubxlib` source files and the `ubxlib` include files; otherwise take a look at the existing [nrf5 GCC platform](platform/nrf5sdk/mcu/nrf52/gcc/runner) or [static_size](platform/static_size) platforms as a starting point (though note that the latter does not bring in any `platform` or `test` files),
-- add [Unity](https://github.com/ThrowTheSwitch/Unity) to your build and then compile and run the tests in [u_port_test.c](test/u_port_test.c): if these pass then you have likely completed the necessary porting.
+- add [Unity](https://github.com/ThrowTheSwitch/Unity) to your build and then compile and run the tests in [u_port_test.c](test/u_port_test.c): if these pass then you have likely completed the necessary porting.  If you are using a UART it is a good idea to run all of the `ubxlib` tests with a real target device, if you can, since the `portUartRequiresSpecificWiring()` test does not stress asynchronicity and stop/start behaviour.
 
 # Shared CMake file
 For ports that use CMake [ubxlib.cmake](ubxlib.cmake) can be used to collect the `ubxlib` non-platform-specific source code files, include directories etc.
@@ -40,13 +41,14 @@ You must also specify what `ubxlib` features to enable using the `UBXLIB_FEATURE
 
 To bring the platform-specific files into your CMake file, take a look at, for instance, the Windows-platform [CMakeLists.txt](platform/windows/mcu/win32/runner/CMakeLists.txt) file.
 
-## UBXLIB_FEATURES
-Available features currently are:
-* `u_lib`: include the `lib_common` API
-* `short_range`: include `wifi`, `ble` and `short_range` API
-* `cell`: include `cell` API
-* `gnss`: include `gnss` API
-* `geodesic`: include [GeographicLib](https://github.com/geographiclib/geographiclib), required only if `U_CFG_GEOFENCE` is defined and shapes larger than 1 km in size are being used in the fence, see [u_geofence_geodesic.h](/common/geofence/api/u_geofence_geodesic.h] for details.
+## `UBXLIB_FEATURES`
+Available features are:
+- `u_lib`: include the `lib_common` API,
+- `short_range`: include `wifi`, `ble` and `short_range` API,
+- `short_range_gen2`: should be used IN ADDITION TO `short_range` and ONLY IF you are using the short-range NORA-W36 module; this is required since NORA-W36 comes with a second generation u-connectExpress,
+- `cell`: include `cell` API,
+- `gnss`: include `gnss` API,
+- `geodesic`: include [GeographicLib](https://github.com/geographiclib/geographiclib), required only if `U_CFG_GEOFENCE` is defined and shapes larger than 1 km in size are being used in the fence, see [u_geofence_geodesic.h](/common/geofence/api/u_geofence_geodesic.h) for details.
 
 ## Example
 ```cmake
@@ -68,18 +70,18 @@ include(${UBXLIB_BASE}/port/ubxlib.cmake)
 
 ## Output Variables
 After `ubxlib.cmake` has been included the following variables will be available:
-* `UBXLIB_SRC`: A list of all the  non-platform-specific .c files
-* `UBXLIB_INC`: A list of the public include directories
-* `UBXLIB_PRIVATE_INC`: A list of the private include directories required to build ubxlib
-* `UBXLIB_TEST_SRC`: A list of all the test .c files
-* `UBXLIB_TEST_INC`: A list of test include directories
+- `UBXLIB_SRC`: A list of all the  non-platform-specific `.c` files,
+- `UBXLIB_INC`: A list of the public include directories,
+- `UBXLIB_PRIVATE_INC`: A list of the private include directories required to build `ubxlib`,
+- `UBXLIB_TEST_SRC`: A list of all the test `.c` files,
+- `UBXLIB_TEST_INC`: A list of test include directories,
 
 # Shared Makefile
 For ports that use `make` [ubxlib.mk](ubxlib.mk) can be used to collect the non-platform-specific `ubxlib` source code files, include directories etc. in the same way as for CMake above.
 
-Just like the shared CMake file you must first set the variable `UBXLIB_BASE` to root directory of `ubxlib` and configure the `ubxlib` features using the `UBXLIB_FEATURES` (please see [UBXLIB_FEATURES](#UBXLIB_FEATURES) above). `ubxlib.mk` will then define the same output variables as the shared CMake above (see [Output Variables](#Output-Variables))
+Just like the shared CMake file you must first set the variable `UBXLIB_BASE` to root directory of `ubxlib` and configure the `ubxlib` features using `UBXLIB_FEATURES` (see above). `ubxlib.mk` will then define the same output variables as the shared CMake above (see [Output Variables](#Output-Variables))
 
-To bring the platform-specific files into your `Makefile`, take a look at, for instance, the STM32F4 [Makefile](platform/stm32cube/mcu/stm32f4/runner/Makefile).
+To bring the platform-specific files into your `Makefile`, take a look at, for instance, the [STM32F4 Makefile](platform/stm32cube/mcu/stm32f4/runner/Makefile).
 
 ## Example
 ```makefile

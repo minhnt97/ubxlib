@@ -123,12 +123,13 @@ source ~/.invoke-completion.sh
 ## `automation` Tasks
 The Jenkins pipeline will only use the `automation` PyInvoke tasks. The flow in Jenkins is:
 1. Decide what instances and tests to run by calling `automation.get-test-selection`.
-2. For each instance from step 1 call `automation.build --filter=<test_filter> <instance>` to build the firmware.
+2. For each instance from step 1 call `automation.build --filter=<test_filter> --features=<features> <instance>` to build the firmware.
 3. For each instance from step 1 call `automation.flash <instance>` to flash the firmware.
-4. For each instance from step 1 call `automation.test --filter=<test_filter> <instance>` to start the tests.
+4. For each instance from step 1 call `automation.test <instance>` to start the tests.
+5. For each instance from step 1 call `automation.run --filter=<test_filter> --features=<features> <instance>` to do 2, 3 and then 4.
 
 So if you need to run the test automation locally you can invoke `automation.build`, `automation.flash` and/or `automation.test` with the instance ID as argument.
-As default all tests will be executed, but if you only want to run specific test you can use the `--filter` flag.
+As default all tests will be executed, but if you only want to run specific tests you can use the `--filter` flag when building or running (since the filter is built into the code the build step must be included).  Also by default, the features specified by the environment variable `UBXLIB_FEATURES` (if empty cellular, GNSS and short range) will be built unless something like, for instance, `--features="cell gnss"` is specified.
 
 The `automation` tasks works as an abstract layer to the platform (i.e. `arduino.<command>`, `nrf5.<command>`, ...) tasks. This means that when you call `automation.build 12` the task will check [DATABASE.md](DATABASE.md) to find what platform instance 12 is. In this case it will be `ESP-IDF` so then the `automation.build` task will in turn call `esp-idf.build` to build the firmware.
 
@@ -180,11 +181,11 @@ As described in the previous section Jenkins uses the `automation.<command>` PyI
 ```
   "CONNECTION_INSTANCE_16": {
     "serial_port": "COM3",
-    "debugger": None
+    "debugger": "none"
   }
 ```
 
-By setting `debugger` to `None`, the script will simply pick the one and only connected board. Should there be multiple boards connected to the PC, one must specify the correct serial number for the debugger.
+By setting `debugger` to `"none"`, the script will simply pick the one and only connected board. Should there be multiple boards connected to the PC, one must specify the correct serial number for the debugger.
 
 # Jenkins Test Selection
 As a first step in the Jenkins pipeline there is a script that decides what instances and tests suites to run. This is handled by the `automation.get-test-selection` PyInvoke task. This task returns a JSON struct with a list of instances to run and a test filter. The input to this script is the last commit message and what files have been modified like (for more details on how to use PyInvoke tasks see [PyInvoke Tasks](#pyinvoke-tasks) section):
@@ -251,4 +252,4 @@ If the commit text does *not* contain a line starting with `test:` (the usual ca
 - If you add a new platform or test suite, add it to [DATABASE.md](DATABASE.md) and make sure that the result is parsed correctly by [u_data.py](./scripts/u_data.py) (e.g. by running `automation.<command>` PyInvoke tasks) from the command-line and checking that everything is correct).
 - If you add a new item in the range 0 to 9 (i.e. a checker with no platform), update [automation.py](./tasks/automation.py) to include it.
 - If you add a new directory OFF THE ROOT of `ubxlib`, i.e. something like `ubxlib/blah`, add it to the `ASTYLE_DIRS` variable of the [u_run_astyle.py](./scripts/u_run_astyle.py) script.
-- When the FW version of a cellular module, or GNSS chip, or uConnectExpress version in the test system is updated, update the `README.md` in the corresponding test directory with that version.
+- When the FW version of a cellular module, or GNSS chip, or u-connectExpress version in the test system is updated, update the `README.md` in the corresponding test directory with that version.

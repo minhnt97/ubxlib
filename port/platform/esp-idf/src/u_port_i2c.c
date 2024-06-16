@@ -1,5 +1,5 @@
 ﻿/*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -203,7 +203,7 @@ static int32_t send(int32_t handle, uint16_t address,
             // Now add the data, with optional stop marker, and execute it
             if (((pData == NULL) || (i2c_master_write(cmd, (const uint8_t *) pData, size, true) == ESP_OK)) &&
                 (noStop || (i2c_master_stop(cmd) == ESP_OK)) &&
-                (i2c_master_cmd_begin(handle, cmd, 0) == ESP_OK)) {
+                (i2c_master_cmd_begin(handle, cmd, (TickType_t) portMAX_DELAY) == ESP_OK)) {
                 errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
             }
         }
@@ -250,7 +250,7 @@ static int32_t receive(int32_t handle, uint16_t address, char *pData, size_t siz
             }
             if ((errorCodeOrLength == (int32_t) U_ERROR_COMMON_SUCCESS) &&
                 (i2c_master_stop(cmd) == ESP_OK) &&
-                (i2c_master_cmd_begin(handle, cmd, 0) == ESP_OK)) {
+                (i2c_master_cmd_begin(handle, cmd, (TickType_t) portMAX_DELAY) == ESP_OK)) {
                 errorCodeOrLength = (int32_t) size;
             }
         }
@@ -531,6 +531,41 @@ int32_t uPortI2cGetTimeout(int32_t handle)
 }
 
 // Send and/or receive over the I2C interface as a controller.
+int32_t uPortI2cControllerExchange(int32_t handle, uint16_t address,
+                                   const char *pSend, size_t bytesToSend,
+                                   char *pReceive, size_t bytesToReceive,
+                                   bool noInterveningStop)
+{
+    int32_t errorCodeOrLength = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
+
+    if (gMutex != NULL) {
+
+        U_PORT_MUTEX_LOCK(gMutex);
+
+        errorCodeOrLength = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
+        if ((handle >= 0) && (handle < sizeof(gI2cData) / sizeof(gI2cData[0])) &&
+            (gI2cData[handle].clockHertz > 0) &&
+            ((pSend != NULL) || (bytesToSend == 0)) &&
+            ((pReceive != NULL) || (bytesToReceive == 0))) {
+            errorCodeOrLength = (int32_t) U_ERROR_COMMON_SUCCESS;
+            if (pSend != NULL) {
+                errorCodeOrLength = send(handle, address, pSend, bytesToSend,
+                                         noInterveningStop);
+            }
+            if ((errorCodeOrLength == (int32_t) U_ERROR_COMMON_SUCCESS) &&
+                (pReceive != NULL)) {
+                errorCodeOrLength = receive(handle, address, pReceive, bytesToReceive);
+            }
+        }
+
+        U_PORT_MUTEX_UNLOCK(gMutex);
+    }
+
+    return errorCodeOrLength;
+}
+
+/** \deprecated please use uPortI2cControllerExchange() instead. */
+// Send and/or receive over the I2C interface as a controller.
 int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
                                       const char *pSend, size_t bytesToSend,
                                       char *pReceive, size_t bytesToReceive)
@@ -562,6 +597,7 @@ int32_t uPortI2cControllerSendReceive(int32_t handle, uint16_t address,
     return errorCodeOrLength;
 }
 
+/** \deprecated please use uPortI2cControllerExchange() instead. */
 // Perform a send over the I2C interface as a controller.
 int32_t uPortI2cControllerSend(int32_t handle, uint16_t address,
                                const char *pSend, size_t bytesToSend,

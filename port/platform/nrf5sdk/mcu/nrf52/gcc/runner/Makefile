@@ -10,6 +10,10 @@ UNITY_PATH ?= $(UBXLIB_PATH)/../Unity
 NRF5_PATH ?= $(UBXLIB_PATH)/../nrf5
 JLINK_SERIAL_NUMBER := 
 
+$(info )
+$(warning *** IMPORTANT: this platform is now DEPRECATED, it is no longer supported and will be REMOVED in release 1.5, mid 2024: please use /port/platform/zephyr instead. ***)
+$(info )
+
 # This is picked up in gcc_startup_nrf52840.S to
 # set the heap size.  If you modify this value then
 # make sure that the value of configTOTAL_HEAP_SIZE
@@ -17,7 +21,7 @@ JLINK_SERIAL_NUMBER :=
 # (and in the SES SDK you'll find a variable
 # "arm_linker_heap_size" nestling in the .emProject
 # file, if you want to align the two SDKs).
-HEAP_SIZE        := 54272
+HEAP_SIZE        := 55808
 
 $(info    MAKEFILE_DIR is "$(MAKEFILE_DIR)")
 $(info    OUTPUT_DIRECTORY will be "$(OUTPUT_DIRECTORY)")
@@ -96,7 +100,6 @@ SRC_FILES += \
   $(UBXLIB_PATH)/port/clib/u_port_clib_mktime64.c \
   $(UBXLIB_PATH)/port/u_port_timezone.c \
   $(UBXLIB_PATH)/port/platform/common/heap_check/u_heap_check.c \
-  $(UBXLIB_BASE)/port/platform/common/mbedtls/u_port_crypto.c \
   $(NRF5_PORT_PATH)/src/u_port.c \
   $(NRF5_PORT_PATH)/src/u_port_debug.c \
   $(NRF5_PORT_PATH)/src/u_port_gpio.c \
@@ -107,7 +110,6 @@ SRC_FILES += \
   $(NRF5_PORT_PATH)/src/u_port_private.c \
   $(NRF5_PORT_PATH)/src/u_exception_handler.c \
   $(NRF5_PORT_PATH)/src/heap_useNewlib.c \
-  $(NRF5_PORT_PATH)/src/mbedtls_platform_zeroize.c \
   $(NRF5_PORT_PATH)/src/segger_rtt/RTT/SEGGER_RTT.c \
   $(NRF5_PORT_PATH)/src/segger_rtt/RTT/SEGGER_RTT_printf.c \
   $(NRF5_PORT_PATH)/src/segger_rtt/Syscalls/SEGGER_RTT_Syscalls_GCC.c \
@@ -184,7 +186,6 @@ override CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 override CFLAGS += -fno-builtin -fshort-enums
 override CFLAGS += -DUNITY_INCLUDE_CONFIG_H
 override CFLAGS += -DDEBUG_NRF
-override CFLAGS += -DMBEDTLS_USER_CONFIG_FILE=\"user_mbedtls_config.h\"
 
 # C++ flags common to all targets
 CXXFLAGS += $(OPT)
@@ -220,9 +221,9 @@ LDFLAGS += -Wl,--wrap=realloc
 LDFLAGS += -Wl,--wrap=_realloc_r
 
 nrf52840_xxaa: CFLAGS += -D__HEAP_SIZE=$(HEAP_SIZE)
-nrf52840_xxaa: CFLAGS += -D__STACK_SIZE=8192
+nrf52840_xxaa: CFLAGS += -D__STACK_SIZE=7168
 nrf52840_xxaa: ASMFLAGS += -D__HEAP_SIZE=$(HEAP_SIZE)
-nrf52840_xxaa: ASMFLAGS += -D__STACK_SIZE=8192
+nrf52840_xxaa: ASMFLAGS += -D__STACK_SIZE=7168
 
 # Add standard libraries at the very end of the linker input, after all objects
 # that may need symbols provided by these libraries.

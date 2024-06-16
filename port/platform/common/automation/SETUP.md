@@ -94,8 +94,10 @@ docker build -t jenkins-custom .
 - Execute this docker image with:
 
 ```
-docker run --name jenkins-custom --restart=always --detach --network jenkins --network-alias jenkins-custom --env DOCKER_HOST=tcp://docker:2376 --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 --publish 8080:8080 --publish 50000:50000 --volume $HOME/jenkins:/var/jenkins_home --volume jenkins-docker-certs:/certs/client:ro --log-driver=journald jenkins-custom 
+docker run --name jenkins-custom --restart=always --detach --network jenkins --network-alias jenkins-custom --env DOCKER_HOST=tcp://docker:2376 --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 --env JAVA_OPTS="-Dhudson.model.DirectoryBrowserSupport.CSP=\"script-src 'unsafe-inline'\"" --publish 8080:8080 --publish 50000:50000 --volume $HOME/jenkins:/var/jenkins_home --volume jenkins-docker-certs:/certs/client:ro --log-driver=journald jenkins-custom 
 ```
+
+- Note: the `JAVA_OPTS="hudson.model.DirectoryBrowserSupport.CSP...` bit allows the CodeChecker nodes to display nice HTML output describing exactly what needs fixing when they raise an issue.  This is not a security problem as we lock down access to Jenkins on a certificate/key basis to known users; keep the miscreants out at the gates.
 
 - Note: you can start a command shell _inside_ this running Docker container (you will need this to read the `initialAdminPassword` in the next step) with:
 
@@ -241,6 +243,13 @@ There are a few global variables and a label to set in Jenkines:
 
 - Select `Manage Jenkins` -> `Configure System` and scroll down to `Lockable Resources Manager`.
 - Add N `Lockable Resources` named `ubxlib_tokenX` (i.e. the value of `UBXLIB_TOKEN` above with a `0` after it, then another with a `1` after it, etc.), where N is at least as many as there are test instances with HW attached in [DATABASE.md](DATABASE.md), and give them all the label `ubxlib_token`; `Jenkinsfile` and the clean-up script [jenkins_ubxlib_clean_up.txt](scripts/jenkins_ubxlib_clean_up.txt) will lock this label to coordinate their activities.
+- Press `Save`.
+
+## Configure Global Jenkins Build Discarder
+The global Jenkins build discarder has a default "keep" time of 30 days; you may find this is a bit too relaxed for a 32 gigabyte Raspberry Pi SD card, so:
+
+- Select `Manage Jenkins` -> `Configure System` and scroll down to `Global Build Discarders`.
+- Under `Default Build Discarder` set `Days to keep builds` and `Days to keep artifacts` to 7.
 - Press `Save`.
 
 # Jenkins Agents
@@ -491,12 +500,12 @@ echo Updating ubxlib Docker image on this agent.
 echo Branch will be $UBXLIB_PRIV_REV, folder where the Docker files are found is assumed to be \"$WORKSPACE/ubxlib/$UBXLIB_DOCKER_FOLDER\".
 cd $WORKSPACE/ubxlib/$UBXLIB_DOCKER_FOLDER
 pwd
+# Set exit on error
+set -e
 sudo -E /usr/local/bin/docker-compose build
-if [ $? ]; then
-    if [ -d /home/"$USER"/.docker ]; then
-        sudo chown "$USER":"$USER" /home/"$USER"/.docker -R
-        sudo chmod g+rwx "/home/$USER/.docker" -R
-    fi
+if [ -d /home/"$USER"/.docker ]; then
+    sudo chown "$USER":"$USER" /home/"$USER"/.docker -R
+    sudo chmod g+rwx "/home/$USER/.docker" -R
 fi
 ```
 
@@ -581,8 +590,7 @@ Some other things to set:
 - Under `Manage Jenkins` -> `Configure System` find `Global Build Discarders`, add a `Default Build Discarder` and set `Days to keep builds` and `Days to keep artifacts` to some sensible number (e.g. 30).
 - Under `Manage Jenkins` -> `Configure System` find `Test Results Analyzer` and tick `Display run time for each test` 'cos that's useful to see.
 - You can dismiss the warning about not running jobs on the Jenkins master - we need to do that as we use it for thread-safety when managing shared resources.
-- In order to manage shared resources [Jenkinsfile](Jenkinsfile) uses a file, `shared_resources/counter`, on the Jenkins master, to count the number of things currently using those shared resources.  In case this ever gets out of step with reality, create a new `Pipeline` project, name it `ubxlib_clean_up`, give it a description, e.g. "Clean things up when all nodes are idle.", tick `Build periodicallty` and enter `H 6 * * *` (run at approcimately 06:00 daily), then into `Pipeline script` paste the contents of [jenkins_ubxlib_clean_up.txt](scripts/jenkins_ubxlib_clean_up.txt) and `Save` the project.
-- Select the `built-in` node, select `Script Console` and in it enter `System.setProperty("hudson.model.DirectoryBrowserSupport.CSP", "script-src 'unsafe-inline'")` then press `Run`; if you don't do this the CodeChecker nodes will not be able to display nice HTML output describing exactly what needs fixing.  This is not a security issue as we lock down access to Jenkins on a certificate/key basis to known users; keep the miscreants out at the gates.
+- In order to manage shared resources [Jenkinsfile](Jenkinsfile) uses a file, `shared_resources/counter`, on the Jenkins master, to count the number of things currently using those shared resources.  In case this ever gets out of step with reality, create a new `Pipeline` project, name it `ubxlib_clean_up`, give it a description, e.g. "Clean things up when all nodes are idle.", tick `Build periodicallty` and enter `H 6 * * *` (run at approximately 06:00 daily), then into `Pipeline script` paste the contents of [jenkins_ubxlib_clean_up.txt](scripts/jenkins_ubxlib_clean_up.txt) and `Save` the project.
 
 # Configure Test Instances
 With all of the Jenkins stuff done, and at least one of each agent type (Linux "beefy", Linux Raspbian and Windows), you can start configuring the instances.  Instances up to and including 9, the "check" instances need no further attention; it is the "test" instances, i.e. a thing with real MCUs/modules attached, that need additional configuration.
@@ -593,11 +601,11 @@ Once you have configured an agent to support a test instance defined in [DATABAS
 
 ## Generic Setup
 ### Linux `udev` Rules
-Devices connected via USB to a Linux host need a `udev` rule to make them accessible to Docker and have a fixed identity.  
+Devices connected via USB to a Linux host need a `udev` rule to make them accessible to Docker and have a fixed identity.
 
-- A file is provided [53-dut.rules](53-dut.rules) with a set of the known devices; copy this file into the directory `/etc/udev/rules.d`.
+- A file is provided [53_dut.rules](53_dut.rules) with a set of the known devices; copy this file into the directory `/etc/udev/rules.d`.
 
-- Note: if you end up fiddling with this don't forget to make sure the USB is switched on with `uhubctl -a 1 -l 1-1`.
+- Note: if you end up fiddling with this on a Raspberry Pi don't forget to make sure the USB is switched on with `uhubctl -a 1 -l 1-1`.
 
 - If you should add to the file (and please don't forget to update the one here), reload the `/dev` folder with:
 
@@ -606,7 +614,7 @@ sudo udevadm control --reload
 sudo udevadm trigger
 ```
 
-- To debug issues with your `udev` rules, `sudo udevadm control --log-priority=debug` then `sudo udevadm trigger` followed by `sudo journalctl -n 10000` and scroll down to the end of the log to check for `53-dut.rules` being read and then look for lines where its rules are being triggered.
+- To debug issues with your `udev` rules, `sudo udevadm control --log-priority=debug` then `sudo udevadm trigger` followed by `sudo journalctl -n 10000` and scroll down to the end of the log to check for `53_dut.rules` being read and then look for lines where its rules are being triggered.
 
 - Note: if you edit a `.rules` file, don't forget to reload them all with `sudo udevadm control --reload` before testing.
 
@@ -620,7 +628,7 @@ If the server has no DNS entry on the public internet (required for some tests) 
 ### Cellular And Short Range Network Test Peers
 A Nutaq cellular network box is required for cellular Cat-M1 coverage; set up of this is out of scope of this document: provided an RF link gets to the relevant test instances and the Nutaq has public internet access, that is all that is required.  To be clear, the Nutaq box does _not_ have to be on the same network as the `ubxlib` test system (though it can be if desired).
 
-Some cellualr test instances (e.g. instance 25 and 29) may use the live network for their cellular test peer, rather than the Nutaq box (e.g. because the RAT that they use is not supported by the Nutaq box, which is the case for LTE non-Cat-M1 and non-NB1).  Some live networks (e.g. O2/Telefonica in the UK) apply some extremely annoying attach/detach rate limitations, and a UE may be band for a attaching/detaching too often, certainly the case for one running our test regime.  To stop this buggering everything up, you should initially control the module in question manually, do a manual selection of a network which does not apply attach/detach rate limitations (e.g. Vodafone or 3 in the UK, where `AT+COPS=1,2,"23415` would, for example, select Vodafone in the UK), then switch back to automatic mode (`AT+COPS=0`), and maybe also add the same network to the preferred list (e.g. `AT+CPOL=1,2,"23415",1,1,1,1` would add Vodafone UK to the top of the list): that should hopefully stick the module to that network.
+Some cellular test instances (e.g. instance 25 and 29) may use the live network for their cellular test peer, rather than the Nutaq box (e.g. because the RAT that they use is not supported by the Nutaq box, which is the case for 2G, 3G, LTE non-Cat-M1 and LTE non-NB1).  Some live networks (e.g. O2/Telefonica in the UK) apply extremely annoying attach/detach rate limitations, and a UE may be banned for a attaching/detaching too often, certainly the case for one running our test regime.  To stop this buggering everything up, you should initially control the module in question directly, do a manual selection of a network which does not apply attach/detach rate limitations (e.g. Vodafone or 3 in the UK, where `AT+COPS=1,2,"23415"` would, for example, select Vodafone in the UK), then switch back to automatic mode (`AT+COPS=0`), and maybe also add the same network to the preferred list (e.g. `AT+CPOL=1,2,"23415",1,1,1,1` would add Vodafone UK to the top of the list): this should hopefully stick the module to that network.
 
 Some short-range test instances require BLE test peers; these just need to be [configured](https://wiki.u-blox.com/bin/view/ShortRange/NewPlatforms), MAC addressses in [DATABASE.md](DATABASE.md) and then plugged into power from the shared resource Ethernet-based relay boxes so that they are powered up at the start of testing and powered down again afterwards.
 
@@ -636,7 +644,8 @@ And finally the test `wifiCaptivePortal()` requires both a Wifi test client and 
   - For a cellular EVK, which uses an FTDI chip, you will need to download and install the [FTDI Windows drivers](https://ftdichip.com/drivers/vcp-drivers/); if you use just the Windows 10 drivers you will end up with character loss.
   - This instance also runs the special test `networkOutage()` which controls an external MiniCircuits Ethernet-based RF switch and KMTronic Ethernet-based relay box; you will see in [DATABASE.md](DATABASE.md) the macros `U_CFG_TEST_NET_STATUS_CELL` and `U_CFG_TEST_NET_STATUS_SHORT_RANGE` which equate to strings such as `RF_SWITCH_A` and `PWR_SWITCH_A`.  The entries under `SWITCH_LIST` in the file `%homedrive%%homepath%\.ubx_automation\settings_v2_agent_specific.json` on the Windows agent map `RF_SWITCH_A`/`PWR_SWITCH_A` to actual IP addresses and an action for `0` or `1`, e.g. `:SETA=1` to switch on the RF switch, `FF0101` to switch on port 1 of the KMTronic switch, all of which are put together by the test scripts to form a URL string.  You need to set up the Ethernet addresses for these correctly in the `%homedrive%%homepath%\.ubx_automation\settings_v2_agent_specific.json` file of the Windows agent.  For the short-range part of this test local test peers are required for both WiFi and BLE: this is done with an appropriately [configured](https://wiki.u-blox.com/bin/view/ShortRange/NewPlatforms) NINA-W1 board, powered from a relay on `PWR_SWITCH_A` (e.g. the first relay on the KMTronic relay box) so that it can be switched off by the test script and configured to advertise a given BLE MAC address (e.g. remote central `6009C390E4DAp`) and include a Wi-Fi AP of a known SSID ( e.g. `disconnect_test_peer`, though not broadcast).
   - Note: if you have problems getting a COM port to appear, which does happen randomly, unplug the USB cable, go to the FTDI website and download their "CDM uninstaller" tool, get it to uninstall drivers for the relevant HW ID (e.g. `4030 6011` for the FTDI chip on the NINA-W1 EVK), then just plug the USB in again and a COM port should appear.
-- Instance 24 is Zephyr/Linux and needs a 32-bit compiler, which means it cannot be run on a Raspberry Pi (since GCC for ARM64 is 64-bit only); you will need to add the label `instance_24` to one of the non-Pi Linux nodes for this.
+- Instance 24.0 is Zephyr/Linux and needs a 32-bit compiler, which means it cannot be run on a Raspberry Pi (since GCC for ARM64 is 64-bit only); you will need to add the label `instance_24` to one of the non-Pi Linux nodes for this.
+- Instance 24.1 is native Linux and can use the default installed GCC version on Linux on this desktop machine, but you will also need to make sure that the `udev` rules file [53_dut.rules](53_dut.rules) (discussed above) is copied into the directory `/etc/udev/rules.d` on this machine so that the LARA-R6 module that is attached is mapped to a fixed name in the `/dev` directory.
 - Instances 13.x, 15.x, 17 and 18 use a SEGGER J-Link probe (either built-in or in a dedicated JLink Base box) and address it by serial number; the correct serial number needs to be set for that instance in the `~/.ubx_automation/settings_v2_agent_specific.json` file of the Raspberry Pis.  You can see what serial number is connected by running the `nrfjprog --ids` command inside the Docker container that [Jenkinsfile](Jenkinsfile) runs:
 ```
 docker run --rm ubxlib_builder nrfjprog --ids

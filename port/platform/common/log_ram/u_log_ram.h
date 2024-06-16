@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,6 @@ typedef struct {
     // making it easier to decode logs on another platform
     int32_t parameter;
 } uLogRamEntry_t;
-
 
 /** Type used to store logging context data.
  */

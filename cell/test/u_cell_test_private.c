@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@
 #include "u_port_os.h"   // Required by u_cell_private.h
 #include "u_port_uart.h"
 
+#include "u_timeout.h"
+
 #include "u_at_client.h"
 
 #include "u_cell_module_type.h"
@@ -53,9 +55,8 @@
 #include "u_cell_pwr.h"
 #include "u_cell_cfg.h"
 #include "u_cell_info.h"
-#ifdef U_CELL_TEST_MUX_ALWAYS
-# include "u_cell_mux.h"
-#endif
+#include "u_cell_mux.h"
+#include "u_cell_ppp_shared.h"
 
 #include "u_cell_test_cfg.h"
 #include "u_cell_test_private.h"
@@ -167,8 +168,8 @@ static void contextSet(uDeviceHandle_t cellHandle,
                 uAtClientLock(atHandle);
                 uAtClientCommandStart(atHandle, "AT+CGDCONT=");
                 uAtClientWriteInt(atHandle, contextId);
-                uAtClientWriteString(atHandle, "IP", true);
                 if (pApn != NULL) {
+                    uAtClientWriteString(atHandle, "IP", true);
                     uAtClientWriteString(atHandle, pApn, true);
                 }
                 uAtClientCommandStopReadResponse(atHandle);
@@ -264,6 +265,12 @@ int32_t uCellTestPrivatePreamble(uCellModuleType_t moduleType,
                 // Power up
                 U_TEST_PRINT_LINE("powering on...");
                 errorCode = uCellPwrOn(cellHandle, U_CELL_TEST_CFG_SIM_PIN, NULL);
+                if (errorCode < 0) {
+                    // If powering-on fails, try sending the CMUX abort sequence in
+                    // case the module is stuck in CMUX mode, and powering-on again
+                    uCellMuxModuleAbort(cellHandle);
+                    errorCode = uCellPwrOn(cellHandle, U_CELL_TEST_CFG_SIM_PIN, NULL);
+                }
                 if (errorCode == 0) {
                     // Note: if this is a SARA-R422 module, which supports only
                     // 1.8V SIMs, the SIM cards we happen to use in the ubxlib test farm
@@ -370,6 +377,14 @@ int32_t uCellTestPrivatePreamble(uCellModuleType_t moduleType,
                                 }
                             }
 
+                            if (errorCode == 0) {
+                                // This code never sets context ID 0 but there have
+                                // been instances of the module reporting a context
+                                // zero, which persists if it is ever set, hence
+                                // we ensure that it is deleted here.
+                                contextSet(cellHandle, 0, NULL);
+                            }
+
                             // If we're on cat-M1 or NB1, set the band-mask
                             // correctly for the Nutaq network box we use for testing
                             if ((errorCode == 0) &&
@@ -460,6 +475,10 @@ void uCellTestPrivatePostamble(uCellTestPrivate_t *pParameters,
     }
 #endif
 
+    if (pParameters->cellHandle != NULL) {
+        // Make sure PPP is closed
+        uCellPppClose(pParameters->cellHandle, true);
+    }
     U_TEST_PRINT_LINE("deinitialising cellular API...");
     // Let uCellDeinit() remove the cell handle
     uCellDeinit();

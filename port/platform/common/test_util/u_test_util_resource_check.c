@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -82,17 +82,19 @@ int32_t uTestUtilGetDynamicResourceCount()
     y = uPortHeapPerpetualAllocCount();
     if (x > 0) {
         resources += x;
-        if (y >= x) {
-            resources -= x;
+        if (y > x) {
+            y = x;
         }
+        resources -= y;
     }
     x = uPortOsResourceAllocCount();
     y = uPortOsResourcePerpetualCount();
     if (x > 0) {
         resources += x;
-        if (y >= x) {
-            resources -= x;
+        if (y > x) {
+            y = x;
         }
+        resources -= y;
     }
     x = uPortUartResourceAllocCount();
     if (x > 0) {
@@ -118,6 +120,7 @@ bool uTestUtilResourceCheck(const char *pPrefix,
     bool resourcesClean = true;
     int32_t x;
     int32_t osShouldBeOutstanding = uPortOsResourcePerpetualCount();
+    int32_t heapShouldBeOutstanding = uPortHeapPerpetualAllocCount();
 
     if (pPrefix == NULL) {
         pPrefix = "";
@@ -157,10 +160,12 @@ bool uTestUtilResourceCheck(const char *pPrefix,
 
     // Check that all heap pUPortMalloc()s have uPortFree()s
     x = uPortHeapAllocCount();
-    if (x > 0) {
+    if (x > heapShouldBeOutstanding) {
         if (printIt) {
-            uPortLog("%s%s%d outstanding call(s) to pUPortMalloc().\n",
-                     pPrefix, pErrorMarker, x);
+            uPortLog("%s%sexpected %d outstanding call(s) to pUPortMalloc()"
+                     " but got %d%s.\n",
+                     pPrefix, pErrorMarker, heapShouldBeOutstanding, x,
+                     (x > heapShouldBeOutstanding) ? "; they might yet be cleaned up" : "");
             uPortHeapDump(pPrefix);
         }
         resourcesClean = false;
@@ -204,6 +209,12 @@ bool uTestUtilResourceCheck(const char *pPrefix,
     }
 
     return resourcesClean;
+}
+
+// Get the current number of failed tests from Unity.
+size_t uTestUtilGetNumFailed()
+{
+    return Unity.TestFailures;
 }
 
 // End of file

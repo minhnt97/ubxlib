@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@
  * macro.
  */
 
-#ifdef U_CFG_TEST_GNSS_MODULE_TYPE
+#if defined(U_CFG_TEST_GNSS_MODULE_TYPE) && !defined(U_CFG_TEST_GNSS_ASSIST_NOW_DISABLE)
 
 # ifdef U_CFG_OVERRIDE
 #  include "u_cfg_override.h" // For a customer's configuration override
@@ -70,6 +70,8 @@
 #include "u_port_spi.h"
 
 #include "u_test_util_resource_check.h"
+
+#include "u_timeout.h"
 
 #include "u_network.h"
 #include "u_network_test_shared_cfg.h"
@@ -350,10 +352,12 @@ static const char *gpOfflineOperation[] = {"send everything", "write to flash", 
  * GNSS chip attached so it is useful to know which one we've selected.
  */
 static const char *const gpTransportType[] = {"None",       // U_DEVICE_TRANSPORT_TYPE_NONE
-                                              "UART",       // U_DEVICE_TRANSPORT_TYPE_UART
+                                              "UART 1",     // U_DEVICE_TRANSPORT_TYPE_UART
                                               "I2C",        // U_DEVICE_TRANSPORT_TYPE_I2C
                                               "SPI",        // U_DEVICE_TRANSPORT_TYPE_SPI
-                                              "Virtual Serial" // U_DEVICE_TRANSPORT_TYPE_VIRTUAL_SERIAL
+                                              "Virtual Serial", // U_DEVICE_TRANSPORT_TYPE_VIRTUAL_SERIAL
+                                              "UART 2",    // U_DEVICE_TRANSPORT_TYPE_UART_2
+                                              "UART USB"   // U_DEVICE_TRANSPORT_TYPE_UART_USB
                                              };
 
 # endif // #if defined(U_CFG_APP_GNSS_ASSIST_NOW_AUTHENTICATION_TOKEN) && defined(U_CFG_TEST_GNSS_MGA) &&
@@ -377,7 +381,7 @@ static void printHex(const char *pHex, size_t length)
         uPortLog("%02x", (unsigned char) c);
     }
 #else
-    (void) pStr;
+    (void) pHex;
     (void) length;
 #endif
 }
@@ -503,7 +507,7 @@ static bool databaseCallback(uDeviceHandle_t devHandle,
                 if ((size >= 2 + 2) &&            // +2 for length
                     (*(pBuffer + 0 + 2) == 3) &&  // AUXDB
                     (*(pBuffer + 2 + 2) == 5)) {  // QZSS
-                    uPortLog("#### gDatabaseHasQzss %s.\n", gDatabaseHasQzss ? "true" : "false");
+                    U_TEST_PRINT_LINE("gDatabaseHasQzss %s.", gDatabaseHasQzss ? "true" : "false");
                     gDatabaseHasQzss = true;
                 }
                 paramLocal += size;
@@ -531,8 +535,8 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
     int64_t timeUtc = 1685651437; // Chosen randomly
     uGnssMgaTimeReference_t timeReference = {U_GNSS_MGA_EXT_INT_0, true, true};
     int32_t y;
-    bool a;
 #ifndef U_GNSS_MGA_TEST_ASSIST_NOW_AUTONOMOUS_NOT_SUPPORTED
+    bool a;
     bool b;
 #endif
     size_t iterations;
@@ -547,7 +551,7 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
     int32_t callbackParameter;
     int32_t z;
     uGnssCommunicationStats_t communicationStats;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
     const char *pProtocolName;
 #endif
 
@@ -581,7 +585,7 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
             // on-board-cellular GNSS chip), reset the GNSS chip here so that
             // the navigation database won't be huge; this improves the
             // stability of testing
-            U_TEST_PRINT_LINE("reseting GNSS before starting.");
+            U_TEST_PRINT_LINE("resetting GNSS before starting.");
             U_PORT_TEST_ASSERT(uUbxProtocolEncode(0x06, 0x04, reset, sizeof(reset), buffer) ==  sizeof(buffer));
             if (uGnssMsgSend(gnssDevHandle, buffer, sizeof(buffer)) == sizeof(buffer)) {
                 uPortTaskBlock(U_GNSS_RESET_TIME_SECONDS * 1000);
@@ -591,10 +595,11 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
         // So that we can see what we're doing
         uGnssSetUbxMessagePrint(gnssDevHandle, true);
 
+#ifndef U_GNSS_MGA_TEST_ASSIST_NOW_AUTONOMOUS_NOT_SUPPORTED
         // Check that setting AssistNow Autonomous works
         a = uGnssMgaAutonomousIsOn(gnssDevHandle);
         U_TEST_PRINT_LINE("AssistNow Autonomous is initially %s.", a ? "on" : "off");
-#ifndef U_GNSS_MGA_TEST_ASSIST_NOW_AUTONOMOUS_NOT_SUPPORTED
+
         U_PORT_TEST_ASSERT(uGnssMgaSetAutonomous(gnssDevHandle, !a) == 0);
         b = uGnssMgaAutonomousIsOn(gnssDevHandle);
         U_TEST_PRINT_LINE("AssistNow Autonomous is now %s.", b ? "on" : "off");
@@ -629,6 +634,7 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
             // Not supported on AT transport
             U_PORT_TEST_ASSERT(y < 0);
         }
+
         U_PORT_TEST_ASSERT(uGnssMgaIniPosSend(gnssDevHandle, NULL) < 0);
         y = uGnssMgaIniPosSend(gnssDevHandle, &gMgaPosFilter);
         U_TEST_PRINT_LINE("sending initial position returned %d.\n", y);
@@ -662,7 +668,7 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
 # ifndef U_GNSS_MGA_TEST_DISABLE_DATABASE
         callbackParameter = 0;
         gDatabaseCalledCount = 0;
-        startTimeMs = uPortGetTickTimeMs();
+        timeoutStart = uTimeoutStart();
         if ((transportTypes[w] != U_GNSS_TRANSPORT_AT) && (intermediateHandle == NULL)) {
             U_TEST_PRINT_LINE("reading database from GNSS device.");
             gDatabaseHasQzss = false;
@@ -670,8 +676,8 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
             U_TEST_PRINT_LINE("uGnssMgaGetDatabase() returned %d.", z);
             if (callbackParameter >= 0) {
                 U_TEST_PRINT_LINE("database callback was called %d times, with a total"
-                                  " of %d byte(s) in %d milliseconds.", gDatabaseCalledCount,
-                                  callbackParameter, uPortGetTickTimeMs() - startTimeMs);
+                                  " of %d byte(s) in %u milliseconds.", gDatabaseCalledCount,
+                                  callbackParameter, uTimeoutElapsedMs(timeoutStart));
                 U_PORT_TEST_ASSERT(z == callbackParameter);
             } else {
                 U_TEST_PRINT_LINE("database callback returned error %d.", callbackParameter);
@@ -717,16 +723,16 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaBasic")
                                             communicationStats.rxPeakPercentageUsage);
                         U_TEST_PRINT_LINE_X(" %d 100 ms interval(s) with receive overrun errors.", x + 1,
                                             communicationStats.rxOverrunErrors);
-                        for (size_t a = 0; a < sizeof(communicationStats.rxNumMessages) /
-                             sizeof(communicationStats.rxNumMessages[0]); a++) {
-                            if (communicationStats.rxNumMessages[a] >= 0) {
-                                pProtocolName = pGnssTestPrivateProtocolName((uGnssProtocol_t) a);
+                        for (size_t i = 0; i < sizeof(communicationStats.rxNumMessages) /
+                             sizeof(communicationStats.rxNumMessages[0]); i++) {
+                            if (communicationStats.rxNumMessages[i] >= 0) {
+                                pProtocolName = pGnssTestPrivateProtocolName((uGnssProtocol_t) i);
                                 if (pProtocolName != NULL) {
                                     U_TEST_PRINT_LINE_X(" %d %s message(s) decoded.", x + 1,
-                                                        communicationStats.rxNumMessages[a], pProtocolName);
+                                                        communicationStats.rxNumMessages[i], pProtocolName);
                                 } else {
                                     U_TEST_PRINT_LINE_X(" %d protocol %d message(s) decoded.", x + 1,
-                                                        communicationStats.rxNumMessages[a], a);
+                                                        communicationStats.rxNumMessages[i], i);
                                 }
                             }
                         }
@@ -1044,7 +1050,7 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaServer")
     U_PORT_TEST_ASSERT(resourceCount <= 0);
 }
 
-# endif // #if defined(U_CFG_APP_GNSS_ASSIST_NOW_AUTHENTICATION_TOKEN) && defined(U_CFG_TEST_GNSS_MGA) &&
+# endif // #if defined(U_CFG_APP_GNSS_ASSIST_NOW_AUTHENTICATION_TOKEN) && defined(U_CFG_TEST_GNSS_ASSIST_NOW) &&
 // (defined(U_CFG_TEST_CELL_MODULE_TYPE) || defined(U_CFG_TEST_SHORT_RANGE_MODULE_TYPE))
 
 /** Clean-up to be run at the end of this round of tests, just
@@ -1073,6 +1079,6 @@ U_PORT_TEST_FUNCTION("[gnssMga]", "gnssMgaCleanUp")
     uTestUtilResourceCheck(U_TEST_PREFIX, NULL, true);
 }
 
-#endif // #if defined(U_CFG_TEST_GNSS_MODULE_TYPE)
+#endif // #if defined(U_CFG_TEST_GNSS_MODULE_TYPE) && !defined(U_CFG_TEST_GNSS_ASSIST_NOW_DISABLE)
 
 // End of file

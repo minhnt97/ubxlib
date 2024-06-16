@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-#ifndef _U_PORT_APP_PLATFORM_SPECIFIC_H_
-#define _U_PORT_APP_PLATFORM_SPECIFIC_H_
+#ifndef _U_CFG_APP_PLATFORM_SPECIFIC_H_
+#define _U_CFG_APP_PLATFORM_SPECIFIC_H_
 
 /** @file
  * @brief This header file contains configuration information for
- * an ESP32 platform that is fed in at application level.  You should
+ * an ESP32 platform that is fed in at application level; NONE of the
+ * parameters here are compiled into ubxlib itself.  You should
  * override these values as necessary for your particular platform.
  * Note that the pin numbers used below should be those of the MCU: if you
  * are using an MCU inside a u-blox module the IO pin numbering for
@@ -227,7 +228,7 @@
  * -------------------------------------------------------------- */
 
 #ifndef U_CFG_APP_PIN_GNSS_ENABLE_POWER
-/** The ESP32 GPIO output that that enables power to the GNSS
+/** The ESP32 GPIO output that enables power to the GNSS
  * module, use -1 if there is no such control.
  */
 # define U_CFG_APP_PIN_GNSS_ENABLE_POWER     -1
@@ -334,6 +335,6 @@
 # define U_CFG_APP_CELL_PIN_GNSS_DATA_READY  24 // AKA GPIO3
 #endif
 
-#endif // _U_PORT_APP_PLATFORM_SPECIFIC_H_
+#endif // _U_CFG_APP_PLATFORM_SPECIFIC_H_
 
 // End of file

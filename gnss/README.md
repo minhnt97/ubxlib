@@ -11,7 +11,7 @@ The GNSS APIs are split into the following groups:
 - `msg`: exchange your own messages with a GNSS module.
 - `dec`: decode messages received directly from the GNSS module via the `msg` API.
 - `mga`: multiple-GNSS assistance; AssistNow and other features that improve time to first fix.
-- `geofence`: flexible MCU-based geofencing, using the common [geofence](/common/geofence/api/u_geofence.h) API, only included if `U_CFG_GEOFENCE` is defined since maths and floating point operations are required; to use WGS84 coordinates and a true-earth model rather than a sphere, see instructions at the top of [u_geofence_geodesic.h](/common/geofence/api/u_geofence_geodesic.h) and the note below about [GeographicLib](https://github.com/geographiclib).
+- `geofence`: flexible MCU-based geofencing, using the common [geofence](/common/geofence/api/u_geofence.h) API, only included if `U_CFG_GEOFENCE` is defined since maths and floating point operations are required; to use WGS84 coordinates and a true-earth model rather than a sphere, see instructions at the top of [u_geofence_geodesic.h](/common/geofence/api/u_geofence_geodesic.h) and the note in the [README.md](/common/geofence) there about [GeographicLib](https://github.com/geographiclib).
 - `util`: utility functions for use with a GNSS module.
 
 The module types supported by this implementation are listed in [u_gnss_module_type.h](api/u_gnss_module_type.h).
@@ -20,25 +20,12 @@ This API relies upon the [common/ubx_protocol](/common/ubx_protocol) component t
 
 The operation of `ubxlib` does not rely on a particular FW version of the GNSS chip; the FW versions that we test with are listed in the [test](test) directory.
 
-# Sub-module [geographiclib](https://github.com/geographiclib)
-If you do not provide your own geodesic functions and intend to use fences with shapes greated than 1 km in size, where the non-spherical nature of the earth has an impact, [GeographicLib](https://github.com/geographiclib) should be used.  To obtain this as a sub-module, make sure that you have done:
-
-`git submodule update --init --recursive`
-
-...and:
-
-- when you set the CMake variable `UBXLIB_FEATURES` in your `CMakeLists.txt` file, add `geodesic` to the list of features,
-- define the conditional compilation flag `U_CFG_GNSS_FENCE_USE_GEODESIC` for your build of `ubxlib` (this will happen automatically on some platforms but, unfortunately, it does not on ESP32 and there is no harm in adding it anyway, to be completely sure),
-- pass the CMake variable `UBXLIB_EXTRA_LIBS`, as set by `ubxlib.cmake`, to the link stage of your `CMakeLists.txt`.
-
-Of course, you must also have defined `U_CFG_GEOFENCE` for your build, in order that geofencing is included at all.
-
 # Usage
 The [api](api) directory contains the files that define the GNSS APIs, each API function documented in its header file.  In the [src](src) directory you will find the implementation of the APIs and in the [test](test) directory the tests for the APIs that can be run on any platform.
 
 A simple usage example is given below.  Note that, before calling `app_start()` the platform must be initialised (clocks started, heap available, RTOS running), in other words `app_task()` can be thought of as a task entry point.  If you open the `u_main.c` file in the `app` directory of your platform you will see how we do this, with `main()` calling a porting API `uPortPlatformStart()` to sort that all out; you could paste the example code into `app_start()` there (and add the inclusion of `ubxlib.h`) as a quick and dirty test (`runner` will build it).
 
-```
+```c
 #include "ubxlib.h"
 #include "u_cfg_app_platform_specific.h"
 

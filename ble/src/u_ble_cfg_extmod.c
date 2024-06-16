@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,8 @@
 
 #include "u_cfg_sw.h"
 #include "u_port_os.h"
+
+#include "u_timeout.h"
 
 #include "u_at_client.h"
 
@@ -172,7 +174,7 @@ static int32_t setServer(const uAtClientHandle_t atHandle, uShortRangeServerType
     }
     error = uAtClientUnlock(atHandle);
 
-    if (found) {
+    if (found && (error == 0)) {
         uAtClientLock(atHandle);
         uAtClientCommandStart(atHandle, "AT+UDSC=");
         uAtClientWriteInt(atHandle, id);
@@ -210,21 +212,45 @@ static int32_t restart(const uAtClientHandle_t atHandle, bool store)
     return error;
 }
 
+static int32_t getSecurityOption(const uAtClientHandle_t atHandle)
+{
+    uAtClientLock(atHandle);
+    uAtClientCommandStart(atHandle, "AT+UBTST?");
+    uAtClientCommandStop(atHandle);
+    uAtClientResponseStart(atHandle, "+UBTST:");
+    int32_t opt = uAtClientReadInt(atHandle);
+    uAtClientResponseStop(atHandle);
+    uAtClientUnlock(atHandle);
+    return opt;
+}
+
+static int32_t setSecurityOption(const uAtClientHandle_t atHandle, int32_t opt)
+{
+    uAtClientLock(atHandle);
+    uAtClientCommandStart(atHandle, "AT+UBTST=");
+    uAtClientWriteInt(atHandle, opt);
+    uAtClientCommandStopReadResponse(atHandle);
+    return uAtClientUnlock(atHandle);
+}
+
 /* ----------------------------------------------------------------
  * PUBLIC FUNCTIONS THAT ARE PRIVATE TO BLE EXTMOD
  * -------------------------------------------------------------- */
 
-int32_t uBlePrivateGetRole(const uAtClientHandle_t atHandle)
+int32_t uBlePrivateGetRole(uDeviceHandle_t devHandle)
 {
     int32_t roleOrError;
-
-    uAtClientLock(atHandle);
-    uAtClientCommandStart(atHandle, "AT+UBTLE?");
-    uAtClientCommandStop(atHandle);
-    uAtClientResponseStart(atHandle, "+UBTLE:");
-    roleOrError = uAtClientReadInt(atHandle);
-    uAtClientResponseStop(atHandle);
-    uAtClientUnlock(atHandle);
+    uAtClientHandle_t atHandle;
+    roleOrError = uShortRangeAtClientHandleGet(devHandle, &atHandle);
+    if (roleOrError == 0) {
+        uAtClientLock(atHandle);
+        uAtClientCommandStart(atHandle, "AT+UBTLE?");
+        uAtClientCommandStop(atHandle);
+        uAtClientResponseStart(atHandle, "+UBTLE:");
+        roleOrError = uAtClientReadInt(atHandle);
+        uAtClientResponseStop(atHandle);
+        uAtClientUnlock(atHandle);
+    }
 
     return roleOrError;
 }
@@ -250,7 +276,7 @@ int32_t uBleCfgConfigure(uDeviceHandle_t devHandle,
                 bool restartNeeded = false;
                 atHandle = pInstance->atHandle;
 
-                int32_t role = uBlePrivateGetRole(atHandle);
+                int32_t role = uBlePrivateGetRole(devHandle);
                 if (role != (int32_t) pCfg->role) {
                     errorCode = setBleRole(atHandle, (int32_t) pCfg->role);
                     if (errorCode == (int32_t) U_ERROR_COMMON_SUCCESS) {
@@ -274,14 +300,27 @@ int32_t uBleCfgConfigure(uDeviceHandle_t devHandle,
                     }
                 }
 
+                // ODIN-W2 only supports simple pairing security and
+                // therefore cannot be configured
+                if ((errorCode >= 0) &&
+                    pInstance->pModule->moduleType != U_SHORT_RANGE_MODULE_TYPE_ODIN_W2) {
+                    int32_t secOpt = getSecurityOption(atHandle);
+                    if (secOpt != 1) {
+                        errorCode = setSecurityOption(atHandle, 1);
+                        if (errorCode == (int32_t) U_ERROR_COMMON_SUCCESS) {
+                            restartNeeded = true;
+                        }
+                    }
+                }
+
                 int32_t mode = getStartupMode(atHandle);
-                if (mode != U_BLE_CFG_STARTUP_MODE_EDM) {
+                if ((errorCode >= 0) &&
+                    (mode != U_BLE_CFG_STARTUP_MODE_EDM)) {
                     errorCode = setStartupMode(atHandle, U_BLE_CFG_STARTUP_MODE_EDM);
                     if (errorCode == (int32_t) U_ERROR_COMMON_SUCCESS) {
                         restartNeeded = true;
                     }
                 }
-
 
                 if (errorCode >= 0 && restartNeeded) {
                     restart(atHandle, true);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,9 @@
 #include "u_port_os.h"
 #include "u_port_heap.h"
 #include "u_port_uart.h"
+#include "u_port_ppp.h"
+
+#include "u_timeout.h"
 
 #include "u_time.h"
 
@@ -458,7 +461,7 @@ int32_t uCellTimeEnable(uDeviceHandle_t cellHandle,
             ((mode == U_CELL_TIME_MODE_PULSE) || (mode == U_CELL_TIME_MODE_ONE_SHOT) ||
              (mode == U_CELL_TIME_MODE_EXT_INT_TIMESTAMP))) {
             errorCode = (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
-            if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+            if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
                 errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
                 pContext = (uCellTimePrivateContext_t *) pInstance->pCellTimeContext;
                 if (pContext == NULL) {
@@ -577,7 +580,7 @@ int32_t uCellTimeDisable(uDeviceHandle_t cellHandle)
         pInstance = pUCellPrivateGetInstance(cellHandle);
         if (pInstance != NULL) {
             errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-            if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+            if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
                 atHandle = pInstance->atHandle;
                 pContext = (uCellTimePrivateContext_t *) pInstance->pCellTimeContext;
                 if (pContext != NULL) {
@@ -639,7 +642,7 @@ int32_t uCellTimeSetCallback(uDeviceHandle_t cellHandle,
                 errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
             } else {
                 errorCode = (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
-                if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+                if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
                     errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
                     if (pContext == NULL) {
                         // This may be called before uCellTimeEnable() so need
@@ -680,9 +683,15 @@ int32_t uCellTimeSyncCellEnable(uDeviceHandle_t cellHandle,
     uCellTimeCellSyncPrivateContext_t *pContext;
     uAtClientHandle_t atHandle;
     char buffer[7]; // Enough room for MCC/MNC plus a null terminator
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
 
     if (gUCellPrivateMutex != NULL) {
+
+        // Since this function requires the normal radio
+        // operation of the module to be disabled, take any
+        // PPP connection down first (since we can't do so
+        // while the cellular API mutex is locked)
+        uPortPppDisconnect(cellHandle);
 
         U_PORT_MUTEX_LOCK(gUCellPrivateMutex);
 
@@ -690,7 +699,7 @@ int32_t uCellTimeSyncCellEnable(uDeviceHandle_t cellHandle,
         pInstance = pUCellPrivateGetInstance(cellHandle);
         if ((pInstance != NULL) && (pCell != NULL)) {
             errorCode = (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
-            if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+            if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
                 errorCode = (int32_t) U_ERROR_COMMON_NO_MEMORY;
                 pContext = (uCellTimeCellSyncPrivateContext_t *) pInstance->pCellTimeCellSyncContext;
                 if (pContext == NULL) {
@@ -726,10 +735,11 @@ int32_t uCellTimeSyncCellEnable(uDeviceHandle_t cellHandle,
                         errorCode = uAtClientUnlock(atHandle);
                         if (errorCode == 0) {
                             // Wait for the URC for the outcome
-                            startTimeMs = uPortGetTickTimeMs();
+                            timeoutStart = uTimeoutStart();
                             errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
                             while ((pContext->errorCode == INT_MIN) &&
-                                   (uPortGetTickTimeMs() - startTimeMs < (U_CELL_TIME_SYNC_TIME_SECONDS * 1000))) {
+                                   !uTimeoutExpiredSeconds(timeoutStart,
+                                                           U_CELL_TIME_SYNC_TIME_SECONDS)) {
                                 uPortTaskBlock(1000);
                             }
                             if (pContext->errorCode != INT_MIN) {
@@ -763,7 +773,7 @@ int32_t uCellTimeSyncCellDisable(uDeviceHandle_t cellHandle)
     uCellPrivateInstance_t *pInstance;
     uCellTimeCellSyncPrivateContext_t *pContext;
     uAtClientHandle_t atHandle;
-    int32_t startTimeMs;
+    uTimeoutStart_t timeoutStart;
 
     if (gUCellPrivateMutex != NULL) {
 
@@ -773,7 +783,7 @@ int32_t uCellTimeSyncCellDisable(uDeviceHandle_t cellHandle)
         pInstance = pUCellPrivateGetInstance(cellHandle);
         if (pInstance != NULL) {
             errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-            if (pInstance->pModule->moduleType == U_CELL_MODULE_TYPE_SARA_R5) {
+            if (U_CELL_PRIVATE_MODULE_IS_SARA_R5(pInstance->pModule->moduleType)) {
                 pContext = (uCellTimeCellSyncPrivateContext_t *) pInstance->pCellTimeCellSyncContext;
                 if (pContext != NULL) {
                     atHandle = pInstance->atHandle;
@@ -788,10 +798,11 @@ int32_t uCellTimeSyncCellDisable(uDeviceHandle_t cellHandle)
                         errorCode = uAtClientUnlock(atHandle);
                         if (errorCode == 0) {
                             // Have to wait for the URC for the outcome
-                            startTimeMs = uPortGetTickTimeMs();
+                            timeoutStart = uTimeoutStart();
                             errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
                             while ((pContext->errorCode != (int32_t) U_ERROR_COMMON_CANCELLED) &&
-                                   (uPortGetTickTimeMs() - startTimeMs < (U_CELL_TIME_SYNC_TIME_SECONDS * 1000))) {
+                                   !uTimeoutExpiredSeconds(timeoutStart,
+                                                           U_CELL_TIME_SYNC_TIME_SECONDS)) {
                                 uPortTaskBlock(1000);
                             }
                             if (pContext->errorCode != INT_MIN) {

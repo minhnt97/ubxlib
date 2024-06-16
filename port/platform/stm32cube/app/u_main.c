@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 u-blox
+ * Copyright 2019-2024 u-blox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,6 @@
 
 #include "u_debug_utils.h"
 
-
 #include "cmsis_os.h"
 #include "stm32f4xx.h"
 #include "core_cm4.h"
@@ -60,7 +59,7 @@
  * VARIABLES
  * -------------------------------------------------------------- */
 
-// This is needed for OpenOCD FreeRTOS htread awareness
+// This is needed for OpenOCD FreeRTOS thread awareness
 const int __attribute__((used)) uxTopUsedPriority = configMAX_PRIORITIES - 1;
 
 // This is intentionally a bit hidden and comes from u_port_debug.c
