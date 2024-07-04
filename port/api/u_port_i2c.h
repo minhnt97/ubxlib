@@ -143,7 +143,9 @@ void uPortI2cClose(int32_t handle);
  * you know works.  Ultimately the only reliable I2C bus recovery
  * method is out-of-band, i.e. wire the reset pins of your I2C
  * devices together and hang them off a GPIO pin of this MCU that
- * you can reset them all with.
+ * you can reset them all with.  If that is not possible you
+ * might also consider the advice here:
+ * https://www.analog.com/media/en/technical-documentation/application-notes/54305147357414an686_0.pdf.
  *
  * Note that if the I2C interface was adopted rather than
  * opened this will return #U_ERROR_COMMON_NOT_SUPPORTED.
@@ -259,22 +261,8 @@ int32_t uPortI2cGetMaxSegmentSize(int32_t handle);
  * Note that the NRF52 and NRF53 chips require all buffers to
  * be in RAM.
  *
- * Note: where this function is not implemented a weakly-linked
- * version will currently do the following:
- *
- * (a) call uPortI2cControllerSend() if pReceive is NULL or
- *     noInterveningStop is true,
- * (b) call uPortI2cControllerSend() followed by
- *     uPortI2cControllerSendReceive() if pReceive is non-NULL
- *     and noInterveningStop is true,
- * (c) otherwise call uPortI2cControllerSendReceive().
- *
- * This weakly-linked function will be removed when the deprecated
- * uPortI2cControllerSend()/uPortI2cControllerSendReceive() functions
- * are removed.
- *
- * Note also that the uPortI2cSetTimeout() (or the equivalent set
- * by a platform at compile-time) applies for the whole of this
+ * Note that the uPortI2cSetTimeout() (or the equivalent set by
+ * a platform at compile-time) applies for the whole of this
  * transaction, i.e. the peripheral must begin responding within
  * that time; if you wish to allow the peripheral longer to respond
  * you should take control of the time allowed yourself by calling
