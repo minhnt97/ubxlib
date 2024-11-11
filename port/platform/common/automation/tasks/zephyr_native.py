@@ -18,7 +18,8 @@ DEFAULT_BUILD_DIR = os.path.join("_build", "zephyr_native")
 
 BOARD_NAME_TO_MCU = {
     "nucleo_f767zi": "stm32",
-    "nucleo_u575zi_q": "stm32"
+    "nucleo_u575zi_q": "stm32",
+    "frdm_mcxn947/mcxn947/cpu0": "nxp"
 }
 
 def posix_path(path):
@@ -77,8 +78,8 @@ def check_installation(ctx):
     """Check that the toolchain for Zephyr is installed"""
     ctx.zephyr_pre_command = ""
 
-    # Load required packages
-    pkgs = u_package.load(ctx, ["arm_embedded_gcc", "zephyr_native", "ninja", "cmake", "gperf", "unity", "openocd"])
+    # Load required packages: JLink is required for NXP as they don't support OpenOCD
+    pkgs = u_package.load(ctx, ["arm_embedded_gcc", "zephyr_native", "ninja", "cmake", "gperf", "unity", "openocd", "segger_jlink"])
     zephyr_native_pkg = pkgs["zephyr_native"]
     ae_gcc_pkg = pkgs["arm_embedded_gcc"]
     unity_pkg = pkgs["unity"]
@@ -164,9 +165,17 @@ def flash(ctx, board_name, debugger_serial="", output_name=DEFAULT_OUTPUT_NAME,
           build_dir=DEFAULT_BUILD_DIR):
     """Flash a Zephyr-based application"""
     build_dir = os.path.abspath(os.path.join(build_dir, output_name))
+    # Unfortunately the NXP FRDM board doesn't support OpenOCD; we have to use JLink for that case
+    if get_mcu(board_name) == "nxp":
+        runner = "jlink"
+        serial_prefix = "--dev-id"
+    else:
+        runner = "openocd"
+        serial_prefix = "--serial"
+
     if debugger_serial != "":
-        debugger_serial = f"--serial {debugger_serial}"
-    ctx.run(f'{ctx.zephyr_pre_command}west flash --skip-rebuild -d {build_dir} --runner openocd {debugger_serial}', hide=False)
+        debugger_serial = f"{serial_prefix} {debugger_serial}"
+    ctx.run(f'{ctx.zephyr_pre_command}west flash --skip-rebuild -d {build_dir} --runner {runner} {debugger_serial}', hide=False)
 
 @task(
     pre=[check_installation],
@@ -224,6 +233,7 @@ def parse_backtrace(ctx, elf_file, line):
 @task(
     pre=[check_installation],
     help={
+        "toolchain": "Included only for compatibility with other analyzers, ignored in this case",
         "board_name": f"Zephyr board name (default: {DEFAULT_BOARD_NAME})",
         "cmake_dir": f"CMake project directory to build; if not specified cmake_base_dir will apply",
         "cmake_base_dir": f"The base CMake project directory, used if cmake_dir is not provided (default: {DEFAULT_CMAKE_BASE_DIR}); to this will be appended an underscore and then the MCU name for the board",
@@ -233,7 +243,7 @@ def parse_backtrace(ctx, elf_file, line):
         "features": "Feature list, e.g. \"cell short_range\" to leave out gnss; overrides the environment variable UBXLIB_FEATURES"
     }
 )
-def analyze(ctx, board_name=DEFAULT_BOARD_NAME, cmake_dir=None,
+def analyze(ctx, toolchain="", board_name=DEFAULT_BOARD_NAME, cmake_dir=None,
             cmake_base_dir=DEFAULT_CMAKE_BASE_DIR,
             output_name=DEFAULT_OUTPUT_NAME, build_dir=DEFAULT_BUILD_DIR,
             u_flags=None, features=None):

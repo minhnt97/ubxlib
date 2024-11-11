@@ -163,10 +163,12 @@ __DEFAULT_SETTINGS["CONNECTION_INSTANCE_31" + __SETTINGS_POSTFIX_AGENT_SPECIFIC]
      "debugger": "066DFF313937424757082031"}
 __DEFAULT_SETTINGS["CONNECTION_INSTANCE_32" + __SETTINGS_POSTFIX_AGENT_SPECIFIC] = \
     {"serial_port": ("/dev/serial/by-id/"
-                     "usb-STMicroelectronics_STLINK-V3_004800273532510F31333430-if02"),
-     "debugger": "004800273532510F31333430"}
+                     "usb-STMicroelectronics_STLINK-V3_003E004C3532510F31333430-if02"),
+     "debugger": "003E004C3532510F31333430"}
 __DEFAULT_SETTINGS["CONNECTION_INSTANCE_33" + __SETTINGS_POSTFIX_AGENT_SPECIFIC] = \
     {"serial_port": "/dev/silabs_cp210x_uart"}
+__DEFAULT_SETTINGS["CONNECTION_INSTANCE_34" + __SETTINGS_POSTFIX_AGENT_SPECIFIC] = \
+    {"serial_port": "/dev/segger_jlink_frdm_mcxn947_uart", "debugger":"1063565542"}
 # u_data.py
 __DEFAULT_SETTINGS["DATA_FILE"] = "DATABASE.md"
 __DEFAULT_SETTINGS["CELLULAR_MODULE_TYPE_PREFIX"] = "U_CELL_MODULE_TYPE_"
@@ -180,7 +182,7 @@ __DEFAULT_SETTINGS["ASTYLE_DIRS"] = ["."]
 __DEFAULT_SETTINGS["DOXYGEN_DOXYFILE"] = "Doxyfile"
 #u_run_static_size.py
 __DEFAULT_SETTINGS["STATIC_SIZE_ARM_GNU_INSTALL_ROOT" + __SETTINGS_POSTFIX_AGENT_SPECIFIC] = \
-    "/home/ubxlib/.ubxlibpkg/arm_embedded_gcc-10-2020-q4-major/bin/"
+    "/home/ubxlib/.ubxlibpkg/arm_embedded_gcc-13.2.rel1/bin/"
 # u_run_windows.py
 __DEFAULT_SETTINGS["WINDOWS_MSVC_BUILD_TOOLS_PATH" + __SETTINGS_POSTFIX_AGENT_SPECIFIC] =         \
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools"

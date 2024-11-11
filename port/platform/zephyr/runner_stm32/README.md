@@ -6,7 +6,7 @@ While in the `port/platform/zephyr/runner_stm32` directory, for example:
 
   ```
   west build -p auto -b nucleo_f767zi . --build-dir build_nucleo_f767zi
-  west flash --build-dir nucleo_f767zi
+  west flash --build-dir build_nucleo_f767zi
   ```
 
 # Usage

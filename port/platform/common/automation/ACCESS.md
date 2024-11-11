@@ -141,7 +141,7 @@ sudo docker run --rm --name certbot --env AWS_CONFIG_FILE=/etc/aws/config -v /et
 - Set this up to [auto-renew](https://eff-certbot.readthedocs.io/en/stable/using.html#setting-up-automated-renewal) (checked twice daily) with:
 
 ```
-SLEEPTIME=$(awk 'BEGIN{srand(); print int(rand()*(3600+1))}'); echo "0 0,12 * * * root sleep $SLEEPTIME && docker run --rm --name certbot --env AWS_CONFIG_FILE=/etc/aws/config -v /etc/aws:/etc/aws -v /etc/letsencrypt:/etc/letsencrypt -v /var/lib/letsencrypt:/var/lib/letsencrypt certbot/dns-route53 renew -q" | sudo tee -a /etc/crontab > /dev/null
+SLEEPTIME=$(awk 'BEGIN{srand(); print int(rand()*(3600+1))}'); echo "0 0,12 * * * root sleep $SLEEPTIME && docker run --rm --name certbot --env AWS_CONFIG_FILE=/etc/aws/config -v /etc/aws:/etc/aws -v /etc/letsencrypt:/etc/letsencrypt -v /var/lib/letsencrypt:/var/lib/letsencrypt certbot/dns-route53 renew -q && docker stop certbot" | sudo tee -a /etc/crontab > /dev/null
 ```
 
 - To have `NGINX` restarted when auto-renewal has occurred, you'll need to create a named pipe on the host machine to which the `certbot/dns-route53` Docker container can send a reload command; it goes like this:
@@ -474,7 +474,7 @@ cat ~/ubxlib_test_system_client_key.pub >> /home/ubxlib/.ssh/authorized_keys
 systemctl restart sshd_external.service
 ```
 
-- The client should now be able to SSH into the Jenkins machine with something like `ssh -i path/to/ubxlib_test_system_client_key -p <ssh_port> ubxlib@jenkinsurl`, or you may use [PuTTY](https://www.putty.org/), for which you need [to convert your private key to a `.ppk` file](https://sites.google.com/site/xiangyangsite/home/technical-tips/linux-unix/common-tips/how-to-convert-ssh-id_rsa-keys-to-putty-ppk).
+- The client should now be able to SSH into the Jenkins machine with something like `ssh -i path/to/ubxlib_test_system_client_key -p <ssh_port> ubxlib@jenkinsurl`, or you may use [PuTTY](https://www.putty.org/), for which you need [to convert your private key to a `.ppk` file](https://www.simplified.guide/putty/convert-ssh-key-to-ppk).
 
 If this doesn't work, try looking at `systemctl status sshd_external.service`, maybe set `LogLevel DEBUG` in the server's `sshd_external_config` or try taking Wireshark logs on the client and server machines to see what SSH might be objecting to.
 

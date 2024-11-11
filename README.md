@@ -1,6 +1,16 @@
-<img src="/readme_images/ubxlib-logo.svg" width="400">
+<b>Dear ubxlib community</b>,
 
-[![important message](/readme_images/important_msg.svg)](/UPCOMING.md)
+After careful consideration, we have decided to discontinue the ubxlib project. This decision was not made lightly, and we want to thank everyone who has contributed, used, and supported this project over the years.
+
+The repository will be archived on 2024-11-08. This means it will become read-only, but you will still be able to fork and clone it. Open issues will be closed till end of 2024. Afterwards no more support for ubxlib is available.  For any questions please use our [support portal](https://www.u-blox.com/support). 
+
+Thank you for your understanding.
+
+Best regards,
+The ubxlib team
+***
+
+<img src="/readme_images/ubxlib-logo.svg" width="400">
 
 <i>Note: if you are reading this from a package-file created by a third-party \[e.g. PlatformIO\] and the links do not work, please try reading it at the original [ubxlib Github site](https://github.com/u-blox/ubxlib) instead.</i>
 # Introduction to `ubxlib`
@@ -47,10 +57,11 @@ Hosts run `ubxlib` and interact with an attached periperal. A host platform cont
 - [u-blox NINA-W1 EVK](https://www.u-blox.com/en/product/evk-nina-w10)
 - [Nordic nRF52840 DK board](https://www.nordicsemi.com/Products/Development-hardware/nrf52840-dk)
 - [Nordic nRF5340 DK board](https://www.nordicsemi.com/Products/Development-hardware/nRF5340-DK)
-- [STM32F4 Discovery board](https://www.st.com/en/evaluation-tools/stm32f4discovery.html)
 - [ESP32-DevKitC](https://www.espressif.com/en/products/devkits/esp32-devkitc/overview)
-
-
+- [STM32F4 Discovery board](https://www.st.com/en/evaluation-tools/stm32f4discovery.html)
+- [STM32F7 Nucleo board](https://www.st.com/en/evaluation-tools/nucleo-f767zi.html)
+- [STM32U5 Nucleo board](https://www.st.com/en/evaluation-tools/nucleo-u575zi-q.html)
+- [NXP FRDM-MCXN947 board](https://www.nxp.com/design/design-center/development-boards-and-designs/general-purpose-mcus/frdm-development-board-for-mcx-n94-n54-mcus:FRDM-MCXN947)
 
 If your MCU is on the list but your board is not:
 - just set the HW pins in the source file of the example to match how your MCU is wired to the u-blox peripheral.
@@ -72,14 +83,14 @@ If your MCU is not on the list:
 # Supported modules as `ubxlib` peripherals and APIs
 Peripherals are u-blox modules which accept commands (e.g. AT-commands) over a serial interface and have no open MCU environment. To run the APIs they need to be attached to a host which runs `ubxlib`. For example in the [test farm](/port/platform/common/automation/DATABASE.md) combinations of hosts and peripherals are listed.
 
-|`ubxlib` peripherals |NINA-B41 series<br />NINA-B31 series<br />NINA-B1 series<br />ANNA-B1|NINA-W13|NINA-W15<br /><nobr>NORA-W36<sup>4</sup></nobr>|SARA-U2 series|LENA-R8 series|SARA-R4 series<br />SARA-R5 series<br />LARA-R6 series<br />|SARA-R510M8S<br />SARA-R520M10S<br />SARA-R422M8S<br />SARA-R422M10S|M8/M9/M10 series|
+|`ubxlib` peripherals |NINA-B41 series<br />NINA-B31 series<br />NINA-B1 series<br />ANNA-B1|NINA-W13|NINA-W15<br /><nobr>NORA-W36<sup>4</sup></nobr>|SARA-U2 series|LENA-R8 series|LEXI-R10 series<br />LEXI-R4 series<br />LEXI-R5 series<br />SARA-R4 series<br />SARA-R5 series<br />LARA-R6 series<br />|SARA-R510M8S<br />SARA-R520M10S<br />SARA-R422M8S<br />SARA-R422M10S|M8/M9/M10 series|
 |-----------|-----------|--------------|-----|-----|-----|------|------|------|
 |**APIs provided by host with peripheral attached**|[ble](/ble "ble API")<br />[device](/common/device "device API")<br />[network](/common/network "network API")|[wifi](/wifi)<br />[device](/common/device "device API")<br />[network](/common/network "network API")<br />[sock](/common/sock "sock API")<br />[TLS&nbsp;security](/common/security "security API")<br />[mqtt_client](/common/mqtt_client "MQTT client API")<br />[http_client](/common/http_client "HTTP client API")|[wifi](/wifi)<br />[ble](/ble "ble API")<br />[device](/common/device "device API")<br />[network](/common/network "network API")<br />[sock](/common/sock "sock API")<br />[TLS&nbsp;security](/common/security "security API")<br />[mqtt_client](/common/mqtt_client "MQTT client API")<br />[http_client](/common/http_client "HTTP client API")|[cell](/cell "cell API")<br />[device](/common/device "device API")<br />[network](/common/network "network API")<br />[sock](/common/sock "sock API")<br />[location<sup>3</sup>](/common/location "location API")<br />[TLS&nbsp;security](/common/security "security API")<br />[http_client](/common/http_client "HTTP client API")|[cell](/cell "cell API")<br />[device](/common/device "device API")<br />[network](/common/network "network API")<br />[sock](/common/sock "sock API")<br />[location<sup>3</sup>](/common/location "location API")<br />[TLS&nbsp;security](/common/security "security API")<br />[mqtt_client](/common/mqtt_client "MQTT client API")|[cell](/cell "cell API")<br />[device](/common/device "device API")<br />[network](/common/network "network API")<br />[sock](/common/sock "sock API")<br />[location<sup>3</sup>](/common/location "location API")<br />[security<sup>5</sup>](/common/security "security API")<br />[mqtt_client](/common/mqtt_client "MQTT client API")<br />[http_client](/common/http_client "HTTP client API")|All APIs of<br />SARA-R4,<br />SARA-R5 series&nbsp;+<br />[gnss](/gnss "GNSS API")<br />[location](/common/location "location API")|[gnss](/gnss "GNSS API")<br />[location](/common/location "location API")|
 
 
 <sup>3: Through the u-blox [CellLocate](https://www.u-blox.com/en/product/celllocate) mobile network-based location service.</sup><br />
 <sup>4: Beta support: please **add** `short_range_gen2` to the `UBXLIB_FEATURES` variable in your `make` or `CMake` file when building `ubxlib` for NORA-W36; NORA-W36 comes with a second generation u-connectExpress, please see the release notes for NORA-W36 for the supported features.</sup><br />
-<sup>5: Except SARA-R422 (non-S), which supports no form of security, and SARA-R52, which supports only [TLS&nbsp;security](/common/security "security API").</sup><br />
+<sup>5: Except SARA-R422 (non-S), which supports no form of security, and LEXI-R5/LEXI-R4/LEXI-R10/SARA-R52, which support only [TLS&nbsp;security](/common/security "security API").</sup><br />
 
 # Structure of `ubxlib`
 The APIs for each type of u-blox module can be found in the relevant directory (e.g. [cell](/cell) for cellular modules and [ble](/ble)/[wifi](/wifi) for BLE/Wi-Fi modules).  The [common](/common) directory contains APIs and 'helper' modules that are shared by u-blox modules, most importantly the [device](/common/device) API, the [network](/common/network) API and the [sockets](/common/sockets) API.  All APIs are documented in the API header files.
@@ -171,7 +182,7 @@ A number of examples are provided with this repo:
 | Cellular     | An [MQTT/MQTT-SN client](/example/mqtt_client "MQTT/MQTT-SN example") using the [MQTT/MQTT-SN client](/common/mqtt_client "MQTT/MQTT-SN client API") API.|
 | Cellular     | An [HTTP client](/example/http_client "HTTP example") using the [HTTP client](/common/http_client "HTTP client API") API.|
 | Cellular     | [CellLocate](/example/location "CellLocate example") example.|
-| Cellular     | The [PSK generation](/example/security/psk "PSK example") example using the [security](/common/security "security API") API. |
+| Cellular     | The [PSK generation](/example/security "PSK example") example using the [security](/common/security "security API") API. |
 | Bluetooth    | See the BLE examples in the [XPLR-IOT-1 ubxlib examples repo](https://github.com/u-blox/ubxlib_examples_xplr_iot/tree/master/examples). |
 | Wi-Fi        | The [sockets](/example/sockets "sockets example") example brings up a TCP/UDP socket by using the [device](/common/device "device API"), [network](/common/network "network API") and [sock](/common/sock "sock API") APIs.  |
 | GNSS         | [location](/example/location "location example") example using a GNSS chip connected directly or via a cellular module.|
@@ -221,7 +232,7 @@ The software in this repository is Apache 2.0 licensed and copyright u-blox with
 
 - The heap management code (`heap_useNewlib.c`), required because the [STM32Cube](/port/platform/stm32cube) platform doesn't provide the necessary memory management for [newlib](https://sourceware.org/newlib/libc.html) and [FreeRTOS](https://www.freertos.org) to play together, is copyright Dave Nadler.
 - The AT client code in [common/at_client](/common/at_client) is derived from the Apache 2.0 licensed AT parser of [mbed-os](https://github.com/ARMmbed/mbed-os).
-- The [stm32cube platform directory](/port/platform/stm32cube/src) necessarily includes porting files from the STM32F4 SDK that are copyright ST Microelectronics.
+- The [stm32cube platform directory](/port/platform/stm32cube/src) necessarily includes porting files from the STM32F4 and STM32U5 SDKs that are copyright ST Microelectronics.
 - The `go` echo servers in [common/sock/test/echo_server](/common/sock/test/echo_server) are based on those used in testing of [AWS FreeRTOS](https://github.com/aws/amazon-freertos).
 - The `setjmp()/longjmp()` implementation in [port/clib/u_port_setjmp.S](/port/clib/u_port_setjmp.S), used when testing the Zephyr platform, is copyright Nick Clifton, Cygnus Solutions and part of [newlib](https://sourceware.org/newlib/libc.html).
 - The `base64` implementation in [common/utils/src/base64.h](/common/utils/src/base64.h) is copyright [William Sherif](https://github.com/superwills/NibbleAndAHalf).
