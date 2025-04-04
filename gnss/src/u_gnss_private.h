@@ -241,6 +241,7 @@ typedef struct {
                        int32_t speedMillimetresPerSecond,
                        int32_t svs,
                        int32_t pDopX1e2,
+                       int32_t velN, int32_t velE, int32_t velD,
                        int64_t timeUtc);
     int32_t measurementPeriodMs; /**< set to -1 of nothing to restore. */
     int32_t navigationCount;     /**< set to -1 of nothing to restore. */
