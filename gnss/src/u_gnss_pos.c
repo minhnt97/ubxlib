@@ -149,7 +149,7 @@ static int32_t posDecode(char *pMessage,
                          int32_t *pAltitudeUncertaintyMillimetres,
                          int32_t *pSpeedMillimetresPerSecond,
                          int32_t *pSvs, int64_t *pTimeUtc, int32_t *pDopX1e2,
-                         int32_t *pvelN, int32_t *pvelE, int32_t *pvelD,
+                         int32_t *pvelN, int32_t *pvelE, int32_t *pvelD, int8_t *pFixModeFlags,
                          bool printIt)
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
@@ -193,6 +193,12 @@ static int32_t posDecode(char *pMessage,
     if ((t >= 0) && (*(pMessage + 21) & 0x01)) {
         if (printIt) {
             uPortLog("U_GNSS_POS: %dD fix achieved.\n", *(pMessage + 20));
+        }
+        if (printIt) {
+            uPortLog("Fix status flags = %d.\n", *(pMessage + 21));
+        }
+        if (pFixModeFlags != NULL) {
+            *pFixModeFlags = *(pMessage + 21);
         }
         y = (int32_t) * (pMessage + 23);
         if (printIt) {
@@ -305,7 +311,7 @@ static int32_t posGet(uGnssPrivateInstance_t *pInstance,
                               pRadiusMillimetres,
                               pAltitudeUncertaintyMillimetres,
                               pSpeedMillimetresPerSecond,
-                              pSvs, pTimeUtc, NULL, NULL, NULL, NULL, printIt);
+                              pSvs, pTimeUtc, NULL, NULL, NULL, NULL, NULL, printIt);
     } else {
         if (errorCode >= 0) {
             errorCode = (int32_t) U_ERROR_COMMON_DEVICE_ERROR;
@@ -405,6 +411,7 @@ static void messageCallback(uDeviceHandle_t gnssHandle,
     int32_t velN = INT_MIN;
     int32_t velE = INT_MIN;
     int32_t velD = INT_MIN;
+    int8_t fixModeFlags = 0;
     int64_t timeUtc = -1;
 
     (void) pMessageId;
@@ -425,7 +432,7 @@ static void messageCallback(uDeviceHandle_t gnssHandle,
                                       &altitudeUncertaintyMillimetres,
                                       &speedMillimetresPerSecond, 
                                       &svs, &timeUtc, &pDopX1e2,
-                                      &velN, &velE, &velD, false);
+                                      &velN, &velE, &velD, &fixModeFlags, false);
         // Call the callback
         // Note: there can be two handles involved here, e.g. if
         // GNSS is inside a cellular device, hence we make sure
@@ -438,7 +445,7 @@ static void messageCallback(uDeviceHandle_t gnssHandle,
                                                 radiusMillimetres,
                                                 altitudeUncertaintyMillimetres,
                                                 speedMillimetresPerSecond,
-                                                svs, pDopX1e2, velN, velE, velD,
+                                                svs, pDopX1e2, velN, velE, velD, fixModeFlags,
                                                 timeUtc);
         if (errorCodeOrLength == 0) {
             // As well as the above, test the position against any
