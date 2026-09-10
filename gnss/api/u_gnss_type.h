@@ -53,7 +53,7 @@
  * to avoid the multiplexer stalling; it likely will be since
  * the frame size is generally small.
  */
-# define U_GNSS_UART_BUFFER_LENGTH_BYTES 1024
+# define U_GNSS_UART_BUFFER_LENGTH_BYTES 4096
 #endif
 
 #ifndef U_GNSS_SPI_BUFFER_LENGTH_BYTES
