@@ -32,7 +32,13 @@
 #include "u_port_os.h"
 #include "u_port_i2c.h"
 
-#include "driver/i2c.h"
+// The legacy I2C driver (driver/i2c.h) is end-of-life from ESP-IDF v6
+// and cannot be linked together with the new one, hence the new
+// I2C master driver is used here.  Since this API passes the address
+// with each transfer, a single device with no address
+// (I2C_DEVICE_ADDRESS_NOT_USED) is attached to each bus and the
+// address bytes are sent explicitly, as with the legacy command links.
+#include "driver/i2c_master.h"
 
 /* ----------------------------------------------------------------
  * COMPILE-TIME MACROS
@@ -44,50 +50,36 @@
 # define U_PORT_I2C_MAX_NUM 2
 #endif
 
+/** The read/write bit appended to an address.
+ */
+#define U_PORT_I2C_READ_BIT  0x01
+#define U_PORT_I2C_WRITE_BIT 0x00
+
 /** Make a 7-bit address with a read bit.
  */
-#define U_PORT_7BIT_ADDRESS_READ(__ADDRESS__) (((__ADDRESS__) << 1) | I2C_MASTER_READ)
+#define U_PORT_7BIT_ADDRESS_READ(__ADDRESS__) (((__ADDRESS__) << 1) | U_PORT_I2C_READ_BIT)
 
 /** Make a 7-bit address with a write bit.
  */
-#define U_PORT_7BIT_ADDRESS_WRITE(__ADDRESS__) (((__ADDRESS__) << 1) | I2C_MASTER_WRITE)
+#define U_PORT_7BIT_ADDRESS_WRITE(__ADDRESS__) (((__ADDRESS__) << 1) | U_PORT_I2C_WRITE_BIT)
 
 /** Create a header to indicate 10-bit address transmission with a read bit.
  */
-#define U_PORT_10BIT_HEADER_READ(__ADDRESS__) ((((__ADDRESS__) & (0x0300)) >> 7) | 0xF0 | I2C_MASTER_READ)
+#define U_PORT_10BIT_HEADER_READ(__ADDRESS__) ((((__ADDRESS__) & (0x0300)) >> 7) | 0xF0 | U_PORT_I2C_READ_BIT)
 
 /** Create a header to indicate 10-bit address transmission with a write bit.
  */
-#define U_PORT_10BIT_HEADER_WRITE(__ADDRESS__) ((((__ADDRESS__) & (0x0300)) >> 7) | 0xF0 | I2C_MASTER_WRITE)
+#define U_PORT_10BIT_HEADER_WRITE(__ADDRESS__) ((((__ADDRESS__) & (0x0300)) >> 7) | 0xF0 | U_PORT_I2C_WRITE_BIT)
 
 /** Get the portion of a 10 bit address that will be sent first (which
  * is the same whether reading or writing).
  */
 #define U_PORT_10BIT_ADDRESS(__ADDRESS__) ((__ADDRESS__) & 0xFF)
 
-#ifndef U_PORT_I2C_ESP32X3_CLOCK_SOURCE
-/** For ESP32 the I2C clock source is the APB clock (80 MHz)
- * and this code doesn't care, however for ESP32x3 the clock
- * source can be selected between the crystal/XTAL (40 MHz) and
- * the RC network which drives the RTC (17.5 MHz); the I2C
- * timeout value is calculated differently depending on which
- * source is employed.  The crystal is the default: switch to
- * the RC network by setting this #define to
- * I2C_SCLK_SRC_FLAG_LIGHT_SLEEP.
+/** The maximum number of operations in one transfer: START, address
+ * (2 bytes for 10-bit), START, address, READ, READ, STOP.
  */
-# define U_PORT_I2C_ESP32X3_CLOCK_SOURCE 0
-#endif
-
-#if U_PORT_I2C_ESP32X3_CLOCK_SOURCE == I2C_SCLK_SRC_FLAG_LIGHT_SLEEP
-# define U_PORT_I2C_CLOCK_PERIOD_NS 57
-#else
-# define U_PORT_I2C_CLOCK_PERIOD_NS 25
-#endif
-
-/** The maximum value that an ESP32X3 I2C timeout
- * register can take.
- */
-#define U_PORT_I2C_ESP32X3_TIMEOUT_REGISTER_MAX 22
+#define U_PORT_I2C_MAX_OPERATIONS 7
 
 /* ----------------------------------------------------------------
  * TYPES
@@ -99,7 +91,10 @@ typedef struct {
     int32_t pinSda;
     int32_t pinSdc;
     int32_t clockHertz; // This also used as a flag to indicate "in use"
+    int32_t timeoutMs;
     bool adopted;
+    i2c_master_bus_handle_t bus;
+    i2c_master_dev_handle_t device;
 } uPortI2cData_t;
 
 /* ----------------------------------------------------------------
@@ -122,57 +117,43 @@ static volatile int32_t gResourceAllocCount = 0;
  * STATIC FUNCTIONS
  * -------------------------------------------------------------- */
 
-// Convert a millisecond timeout to a value that can be passed to
-// i2c_set_timeout()
-static int32_t timeoutMsToEsp32(int32_t timeoutMs)
+// (Re)attach the address-less device, which carries the clock and
+// timeout settings, to the bus of an I2C instance.
+static esp_err_t attachDevice(int32_t index, int32_t clockHertz,
+                              int32_t timeoutMs)
 {
-    int32_t timeoutEsp32 = -1;
+    esp_err_t espErr = ESP_OK;
+    i2c_device_config_t cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = I2C_DEVICE_ADDRESS_NOT_USED,
+        .scl_speed_hz = clockHertz,
+        .scl_wait_us = timeoutMs * 1000
+    };
 
-#ifdef CONFIG_IDF_TARGET_ESP32
-    // Not the X3 case, good 'ole ESP32, nice and simple, units
-    // of one cycle of the 80 MHz APB clock.
-    timeoutEsp32 = timeoutMs * 80000;
-#else
-    int32_t y;
-    // On ESP32X3 and similar the timeout is a power of two times
-    // the chosen source clock period, so 2^x * U_PORT_I2C_CLOCK_PERIOD_NS;
-    // if the 40 MHz crystal is chosen as SCLK then you have
-    // 2^x * 25 ns, where x can be a maximum value of 22, so the
-    // largest timeout value is 2^22 * 25ns = 104.9ms.
-    for (size_t x = 0; (x < U_PORT_I2C_ESP32X3_TIMEOUT_REGISTER_MAX) &&
-         (timeoutEsp32 < 0); x++) {
-        y = (1UL << x) * U_PORT_I2C_CLOCK_PERIOD_NS / 1000000;
-        if (y >= timeoutMs) {
-            timeoutEsp32 = x;
-        }
+    if (gI2cData[index].device != NULL) {
+        espErr = i2c_master_bus_rm_device(gI2cData[index].device);
+        gI2cData[index].device = NULL;
     }
-#endif
+    if (espErr == ESP_OK) {
+        espErr = i2c_master_bus_add_device(gI2cData[index].bus, &cfg,
+                                           &gI2cData[index].device);
+    }
 
-    return timeoutEsp32;
-}
-
-// Convert a value returned by i2c_get_timeout() into milliseconds.
-static int32_t timeoutEsp32ToMs(int32_t timeoutEsp32)
-{
-    int32_t timeoutMs = -1;
-
-#ifdef CONFIG_IDF_TARGET_ESP32
-    // Not the X3 case, good 'ole ESP32.
-    timeoutMs = timeoutEsp32 / 80000;
-#else
-    timeoutMs = (1UL << timeoutEsp32) * U_PORT_I2C_CLOCK_PERIOD_NS / 1000000;
-#endif
-
-    return timeoutMs;
+    return espErr;
 }
 
 // Close an I2C instance.
 static void closeI2c(int32_t index)
 {
     if (gI2cData[index].clockHertz > 0) {
-        if (!gI2cData[index].adopted) {
-            i2c_driver_delete(index);
+        if (gI2cData[index].device != NULL) {
+            i2c_master_bus_rm_device(gI2cData[index].device);
+            gI2cData[index].device = NULL;
         }
+        if (!gI2cData[index].adopted) {
+            i2c_del_master_bus(gI2cData[index].bus);
+        }
+        gI2cData[index].bus = NULL;
         gI2cData[index].clockHertz = -1;
         U_ATOMIC_DECREMENT(&gResourceAllocCount);
     }
@@ -183,31 +164,36 @@ static int32_t send(int32_t handle, uint16_t address,
                     const char *pData, size_t size, bool noStop)
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_operation_job_t ops[U_PORT_I2C_MAX_OPERATIONS] = {0};
+    uint8_t addressBytes[2];
+    size_t numOps = 0;
 
-    if (i2c_master_start(cmd) == ESP_OK) {
+    ops[numOps++].command = I2C_MASTER_CMD_START;
+    // First set up the address
+    if (address > 127) {
+        addressBytes[0] = U_PORT_10BIT_HEADER_WRITE(address);
+        addressBytes[1] = U_PORT_10BIT_ADDRESS(address);
+        ops[numOps].write.total_bytes = 2;
+    } else {
+        addressBytes[0] = U_PORT_7BIT_ADDRESS_WRITE(address);
+        ops[numOps].write.total_bytes = 1;
+    }
+    ops[numOps].command = I2C_MASTER_CMD_WRITE;
+    ops[numOps].write.ack_check = true;
+    ops[numOps++].write.data = addressBytes;
+    // Now add the data, with optional stop marker, and execute it
+    if ((pData != NULL) && (size > 0)) {
+        ops[numOps].command = I2C_MASTER_CMD_WRITE;
+        ops[numOps].write.ack_check = true;
+        ops[numOps].write.data = (const uint8_t *) pData;
+        ops[numOps++].write.total_bytes = size;
+    }
+    if (!noStop) {
+        ops[numOps++].command = I2C_MASTER_CMD_STOP;
+    }
+    if (i2c_master_execute_defined_operations(gI2cData[handle].device,
+                                              ops, numOps, -1) == ESP_OK) {
         errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-        // First set up the address
-        if (address > 127) {
-            if ((i2c_master_write_byte(cmd, U_PORT_10BIT_HEADER_WRITE(address), true) != ESP_OK) ||
-                (i2c_master_write_byte(cmd, U_PORT_10BIT_ADDRESS(address), true) != ESP_OK)) {
-                errorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-            }
-        } else {
-            if (i2c_master_write_byte(cmd, U_PORT_7BIT_ADDRESS_WRITE(address), true) != ESP_OK) {
-                errorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-            }
-        }
-        if (errorCode == (int32_t) U_ERROR_COMMON_SUCCESS) {
-            errorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-            // Now add the data, with optional stop marker, and execute it
-            if (((pData == NULL) || (i2c_master_write(cmd, (const uint8_t *) pData, size, true) == ESP_OK)) &&
-                (noStop || (i2c_master_stop(cmd) == ESP_OK)) &&
-                (i2c_master_cmd_begin(handle, cmd, (TickType_t) portMAX_DELAY) == ESP_OK)) {
-                errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-            }
-        }
-        i2c_cmd_link_delete(cmd);
     }
 
     return errorCode;
@@ -218,43 +204,49 @@ static int32_t send(int32_t handle, uint16_t address,
 static int32_t receive(int32_t handle, uint16_t address, char *pData, size_t size)
 {
     int32_t errorCodeOrLength = (int32_t) U_ERROR_COMMON_PLATFORM;
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_operation_job_t ops[U_PORT_I2C_MAX_OPERATIONS] = {0};
+    uint8_t addressBytes[3];
+    size_t numOps = 0;
 
-    if (i2c_master_start(cmd) == ESP_OK) {
-        errorCodeOrLength = (int32_t) U_ERROR_COMMON_SUCCESS;
-        // First set up the address
-        if (address > 127) {
-            if ((i2c_master_write_byte(cmd, U_PORT_10BIT_HEADER_WRITE(address), true) != ESP_OK) ||
-                (i2c_master_write_byte(cmd, U_PORT_10BIT_ADDRESS(address), true) != ESP_OK) ||
-                (i2c_master_start(cmd) != ESP_OK) ||
-                (i2c_master_write_byte(cmd, U_PORT_10BIT_HEADER_READ(address), true) != ESP_OK)) {
-                errorCodeOrLength = (int32_t) U_ERROR_COMMON_PLATFORM;
-            }
-        } else {
-            if (i2c_master_write_byte(cmd, U_PORT_7BIT_ADDRESS_READ(address), true) != ESP_OK) {
-                errorCodeOrLength = (int32_t) U_ERROR_COMMON_PLATFORM;
-            }
-        }
-        if (errorCodeOrLength == (int32_t) U_ERROR_COMMON_SUCCESS) {
-            // Now read the data, the last byte with a nack, and execute it
-            // Now read the data, the last byte with a nack, and execute it
-            if (size > 1) {
-                if ((i2c_master_read(cmd, (uint8_t *) pData, size - 1, I2C_MASTER_ACK) != ESP_OK) ||
-                    (i2c_master_read_byte(cmd, (uint8_t *) (pData + size - 1), I2C_MASTER_LAST_NACK) != ESP_OK)) {
-                    errorCodeOrLength = (int32_t) U_ERROR_COMMON_PLATFORM;
-                }
-            } else if (size > 0) {
-                if (i2c_master_read_byte(cmd, (uint8_t *) (pData + size - 1), I2C_MASTER_LAST_NACK) != ESP_OK) {
-                    errorCodeOrLength = (int32_t) U_ERROR_COMMON_PLATFORM;
-                }
-            }
-            if ((errorCodeOrLength == (int32_t) U_ERROR_COMMON_SUCCESS) &&
-                (i2c_master_stop(cmd) == ESP_OK) &&
-                (i2c_master_cmd_begin(handle, cmd, (TickType_t) portMAX_DELAY) == ESP_OK)) {
-                errorCodeOrLength = (int32_t) size;
-            }
-        }
-        i2c_cmd_link_delete(cmd);
+    ops[numOps++].command = I2C_MASTER_CMD_START;
+    // First set up the address
+    if (address > 127) {
+        addressBytes[0] = U_PORT_10BIT_HEADER_WRITE(address);
+        addressBytes[1] = U_PORT_10BIT_ADDRESS(address);
+        addressBytes[2] = U_PORT_10BIT_HEADER_READ(address);
+        ops[numOps].command = I2C_MASTER_CMD_WRITE;
+        ops[numOps].write.ack_check = true;
+        ops[numOps].write.data = addressBytes;
+        ops[numOps++].write.total_bytes = 2;
+        ops[numOps++].command = I2C_MASTER_CMD_START;
+        ops[numOps].command = I2C_MASTER_CMD_WRITE;
+        ops[numOps].write.ack_check = true;
+        ops[numOps].write.data = addressBytes + 2;
+        ops[numOps++].write.total_bytes = 1;
+    } else {
+        addressBytes[0] = U_PORT_7BIT_ADDRESS_READ(address);
+        ops[numOps].command = I2C_MASTER_CMD_WRITE;
+        ops[numOps].write.ack_check = true;
+        ops[numOps].write.data = addressBytes;
+        ops[numOps++].write.total_bytes = 1;
+    }
+    // Now read the data, the last byte with a nack, and execute it
+    if (size > 1) {
+        ops[numOps].command = I2C_MASTER_CMD_READ;
+        ops[numOps].read.ack_value = I2C_ACK_VAL;
+        ops[numOps].read.data = (uint8_t *) pData;
+        ops[numOps++].read.total_bytes = size - 1;
+    }
+    if (size > 0) {
+        ops[numOps].command = I2C_MASTER_CMD_READ;
+        ops[numOps].read.ack_value = I2C_NACK_VAL;
+        ops[numOps].read.data = (uint8_t *) (pData + size - 1);
+        ops[numOps++].read.total_bytes = 1;
+    }
+    ops[numOps++].command = I2C_MASTER_CMD_STOP;
+    if (i2c_master_execute_defined_operations(gI2cData[handle].device,
+                                              ops, numOps, -1) == ESP_OK) {
+        errorCodeOrLength = (int32_t) size;
     }
 
     return errorCodeOrLength;
@@ -266,7 +258,8 @@ static int32_t openI2c(int32_t i2c, int32_t pinSda, int32_t pinSdc,
                        bool controller, bool adopt)
 {
     int32_t handleOrErrorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
-    i2c_config_t cfg = {0};
+    i2c_master_bus_config_t cfg = {0};
+    esp_err_t espErr;
 
     if (gMutex != NULL) {
 
@@ -277,23 +270,34 @@ static int32_t openI2c(int32_t i2c, int32_t pinSda, int32_t pinSdc,
             (gI2cData[i2c].clockHertz < 0) && controller &&
             (adopt || ((pinSda >= 0) && (pinSdc >= 0)))) {
             handleOrErrorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-            cfg.mode = I2C_MODE_MASTER;
-            cfg.sda_io_num = pinSda;
-            cfg.scl_io_num = pinSdc;
-            cfg.sda_pullup_en = true;
-            cfg.scl_pullup_en = true;
-            cfg.master.clk_speed = U_PORT_I2C_CLOCK_FREQUENCY_HERTZ;
-            cfg.clk_flags = U_PORT_I2C_ESP32X3_CLOCK_SOURCE;
-            if (adopt ||
-                ((i2c_param_config(i2c, &cfg) == ESP_OK) &&
-                 (i2c_set_timeout(i2c, timeoutMsToEsp32(U_PORT_I2C_TIMEOUT_MILLISECONDS)) == ESP_OK) &&
-                 (i2c_driver_install(i2c, I2C_MODE_MASTER, 0, 0, 0) == ESP_OK))) {
-                // We need to remember the configuration in this case
-                // as the only way to change the clock is to reconfigure
-                // the instance entirely
+            if (adopt) {
+                // Use the bus the application has already created
+                espErr = i2c_master_get_bus_handle(i2c, &gI2cData[i2c].bus);
+            } else {
+                cfg.i2c_port = i2c;
+                cfg.sda_io_num = pinSda;
+                cfg.scl_io_num = pinSdc;
+                cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+                cfg.glitch_ignore_cnt = 7;
+                cfg.flags.enable_internal_pullup = true;
+                espErr = i2c_new_master_bus(&cfg, &gI2cData[i2c].bus);
+            }
+            if (espErr == ESP_OK) {
+                gI2cData[i2c].device = NULL;
+                espErr = attachDevice(i2c, U_PORT_I2C_CLOCK_FREQUENCY_HERTZ,
+                                      U_PORT_I2C_TIMEOUT_MILLISECONDS);
+                if (espErr != ESP_OK) {
+                    if (!adopt) {
+                        i2c_del_master_bus(gI2cData[i2c].bus);
+                    }
+                    gI2cData[i2c].bus = NULL;
+                }
+            }
+            if (espErr == ESP_OK) {
                 gI2cData[i2c].pinSda = pinSda;
                 gI2cData[i2c].pinSdc = pinSdc;
-                gI2cData[i2c].clockHertz = cfg.master.clk_speed;
+                gI2cData[i2c].clockHertz = U_PORT_I2C_CLOCK_FREQUENCY_HERTZ;
+                gI2cData[i2c].timeoutMs = U_PORT_I2C_TIMEOUT_MILLISECONDS;
                 gI2cData[i2c].adopted = adopt;
                 U_ATOMIC_INCREMENT(&gResourceAllocCount);
                 // Return the I2C HW block number as the handle
@@ -323,6 +327,8 @@ int32_t uPortI2cInit()
                 gI2cData[x].pinSda = -1;
                 gI2cData[x].pinSdc = -1;
                 gI2cData[x].clockHertz = -1;
+                gI2cData[x].bus = NULL;
+                gI2cData[x].device = NULL;
             }
         }
     }
@@ -406,9 +412,6 @@ int32_t uPortI2cCloseRecoverBus(int32_t handle)
 int32_t uPortI2cSetClock(int32_t handle, int32_t clockHertz)
 {
     int32_t errorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
-    i2c_config_t cfg = {0};
-    int32_t timeoutEsp32;
-    esp_err_t x;
 
     if (gMutex != NULL) {
 
@@ -420,31 +423,11 @@ int32_t uPortI2cSetClock(int32_t handle, int32_t clockHertz)
             errorCode = (int32_t) U_ERROR_COMMON_NOT_SUPPORTED;
             if (!gI2cData[handle].adopted) {
                 errorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-                // The only way to configure the clock is to do a full
-                // reconfiguration of the instance
-                x = i2c_get_timeout(handle, (int *) &timeoutEsp32);
-                if (x == ESP_OK) {
-                    cfg.mode = I2C_MODE_MASTER;
-                    cfg.sda_io_num = gI2cData[handle].pinSda;
-                    cfg.scl_io_num = gI2cData[handle].pinSdc;
-                    cfg.sda_pullup_en = true;
-                    cfg.scl_pullup_en = true;
-                    cfg.master.clk_speed = clockHertz;
-                    cfg.clk_flags = U_PORT_I2C_ESP32X3_CLOCK_SOURCE;
-
-                    if (i2c_driver_delete(handle) == ESP_OK) {
-                        // Mark the instance as not in use in case reconfiguring
-                        // it doesn't work
-                        gI2cData[handle].clockHertz = -1;
-                        if ((i2c_param_config(handle, &cfg) == ESP_OK) &&
-                            (i2c_set_timeout(handle, timeoutEsp32) == ESP_OK) &&
-                            (i2c_driver_install(handle, I2C_MODE_MASTER, 0, 0, 0) == ESP_OK)) {
-                            // All is good
-                            gI2cData[handle].pinSda = cfg.sda_io_num;
-                            gI2cData[handle].clockHertz = clockHertz;
-                            errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
-                        }
-                    }
+                // The clock is a property of the device attached to the bus
+                if (attachDevice(handle, clockHertz,
+                                 gI2cData[handle].timeoutMs) == ESP_OK) {
+                    gI2cData[handle].clockHertz = clockHertz;
+                    errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
                 }
             }
         }
@@ -493,7 +476,10 @@ int32_t uPortI2cSetTimeout(int32_t handle, int32_t timeoutMs)
             (gI2cData[handle].clockHertz > 0) && (timeoutMs > 0)) {
             if (!gI2cData[handle].adopted) {
                 errorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
-                if (i2c_set_timeout(handle, timeoutMsToEsp32(timeoutMs)) == ESP_OK) {
+                // The timeout is a property of the device attached to the bus
+                if (attachDevice(handle, gI2cData[handle].clockHertz,
+                                 timeoutMs) == ESP_OK) {
+                    gI2cData[handle].timeoutMs = timeoutMs;
                     errorCode = (int32_t) U_ERROR_COMMON_SUCCESS;
                 }
             }
@@ -509,7 +495,6 @@ int32_t uPortI2cSetTimeout(int32_t handle, int32_t timeoutMs)
 int32_t uPortI2cGetTimeout(int32_t handle)
 {
     int32_t errorCodeOrTimeout = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
-    int32_t timeoutEsp32;
 
     if (gMutex != NULL) {
 
@@ -518,10 +503,7 @@ int32_t uPortI2cGetTimeout(int32_t handle)
         errorCodeOrTimeout = (int32_t) U_ERROR_COMMON_INVALID_PARAMETER;
         if ((handle >= 0) && (handle < sizeof(gI2cData) / sizeof(gI2cData[0])) &&
             (gI2cData[handle].clockHertz > 0)) {
-            errorCodeOrTimeout = (int32_t) U_ERROR_COMMON_PLATFORM;
-            if (i2c_get_timeout(handle, (int *) &timeoutEsp32) == ESP_OK) {
-                errorCodeOrTimeout = timeoutEsp32ToMs(timeoutEsp32);
-            }
+            errorCodeOrTimeout = gI2cData[handle].timeoutMs;
         }
 
         U_PORT_MUTEX_UNLOCK(gMutex);
