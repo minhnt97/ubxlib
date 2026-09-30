@@ -91,8 +91,12 @@ set(UBXLIB_PRIVATE_INC ${UBXLIB_PRIVATE_INC} PARENT_SCOPE)
 set(UBXLIB_BASE ${UBXLIB_BASE} PARENT_SCOPE)
 
 # For crypto functions and, from ESP-IDF v5, for drivers, timers
-# and the debug helper in esp_system
-set(COMPONENT_REQUIRES "driver" "esp_timer" "esp_system" "esp_netif" ${UBXLIB_EXTRA_LIBS})
+# and the debug helper in esp_system.
+# From ESP-IDF v6, "driver" only provides the legacy drivers (e.g. I2C)
+# and no longer pulls in the GPIO/UART/SPI driver components, so they
+# must be listed explicitly
+set(COMPONENT_REQUIRES "driver" "esp_driver_gpio" "esp_driver_uart" "esp_driver_spi"
+                       "esp_timer" "esp_system" "esp_event" "esp_netif" ${UBXLIB_EXTRA_LIBS})
 
 message("COMPONENT_REQUIRES for component UBXLIB is ${COMPONENT_REQUIRES}")
 

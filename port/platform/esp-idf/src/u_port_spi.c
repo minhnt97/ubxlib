@@ -32,6 +32,8 @@
 #include "u_port_heap.h"
 #include "u_port_spi.h"
 
+#include "freertos/FreeRTOS.h" // portMAX_DELAY, no longer pulled in by driver headers from ESP-IDF v6
+
 #include "driver/spi_common.h"
 #include "driver/spi_master.h"
 

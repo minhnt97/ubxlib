@@ -259,7 +259,10 @@ int32_t uPortUartOpen(int32_t uart, int32_t baudRate,
 {
 
     int32_t handleOrErrorCode = (int32_t) U_ERROR_COMMON_NOT_INITIALISED;
-    uart_config_t config;
+    // Zero-initialise: fields not explicitly set below (e.g.
+    // rx_glitch_filt_thresh and flags.allow_pd/backup_before_sleep,
+    // which are checked from ESP-IDF v6) must not contain stack garbage
+    uart_config_t config = {0};
     esp_err_t espError;
 
     if (gMutex != NULL) {

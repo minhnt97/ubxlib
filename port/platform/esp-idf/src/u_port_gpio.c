@@ -75,7 +75,7 @@ int32_t uPortGpioConfig(uPortGpioConfig_t *pConfig)
 {
     uErrorCode_t errorCode = U_ERROR_COMMON_INVALID_PARAMETER;
     bool badConfig = false;
-    gpio_config_t config;
+    gpio_config_t config = {0};
     esp_err_t espErr;
 
     if (pConfig != NULL) {
