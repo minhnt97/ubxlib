@@ -976,6 +976,16 @@ static int32_t parseUbx(uParseHandle_t parseHandle, void *pUserParam)
     cka += by;
     ckb += cka;
     l += (((uint16_t) by) << 8);
+    if (((size_t) l + U_UBX_PROTOCOL_OVERHEAD_LENGTH_BYTES) >=
+        U_GNSS_MSG_RING_BUFFER_LENGTH_BYTES) {
+        // Declared length can never fit in the ring buffer: this is not
+        // a real UBX frame waiting for more data, it is a corrupt/bogus
+        // header.  Returning NOT_FOUND (rather than TIMEOUT) lets the
+        // caller discard this byte and resync on the next UBX preamble,
+        // instead of stalling forever waiting for data that can never
+        // arrive in full.
+        return U_ERROR_COMMON_NOT_FOUND;
+    }
     if (l > uRingBufferBytesAvailableUnprotected(parseHandle)) {
         return U_ERROR_COMMON_TIMEOUT;
     }
@@ -2692,7 +2702,7 @@ int32_t uGnssPrivateStreamFillRingBuffer(uGnssPrivateInstance_t *pInstance,
                             // bring in more if more has arrived between the "receive
                             // size" call above and now
                             receiveSize = uPortUartRead(pInstance->transportHandle.uart, pTemporaryBuffer,
-                                                        U_GNSS_MSG_TEMPORARY_BUFFER_LENGTH_BYTES);
+                                                        receiveSize);
                             break;
                         case U_GNSS_PRIVATE_STREAM_TYPE_I2C:
                             // For I2C we need to ask for the amount we know is there since
@@ -2716,7 +2726,7 @@ int32_t uGnssPrivateStreamFillRingBuffer(uGnssPrivateInstance_t *pInstance,
                             // As for the UART case, we ask for as much data as we can
                             uDeviceSerial_t *pDeviceSerial = pInstance->transportHandle.pDeviceSerial;
                             receiveSize = pDeviceSerial->read(pDeviceSerial, pTemporaryBuffer,
-                                                              U_GNSS_MSG_TEMPORARY_BUFFER_LENGTH_BYTES);
+                                                              receiveSize);
                         }
                         break;
                         default:

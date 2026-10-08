@@ -101,6 +101,15 @@ message("COMPONENT_REQUIRES for component UBXLIB is ${COMPONENT_REQUIRES}")
 
 register_component()
 
+# RTCM injection (uGnssMsgSend) and GNSS position streaming share the same
+# UART and serialize on a single global port-layer mutex (gMutex in
+# u_port_uart.c). uPortUartWrite()'s default 30s defensive timeout means a
+# stalled write can starve the position read task (gnssMsgRx) long enough
+# to overflow its RX buffer and desync UBX frame parsing, permanently
+# killing position callbacks until reboot. Shrink the timeout so a stalled
+# write releases the mutex quickly instead.
+target_compile_definitions(${COMPONENT_TARGET} PUBLIC U_PORT_UART_WRITE_TIMEOUT_MS=500)
+
 if (DEFINED ENV{U_FLAGS})
     separate_arguments(U_FLAGS NATIVE_COMMAND "$ENV{U_FLAGS}")
     target_compile_options(${COMPONENT_TARGET} PUBLIC ${U_FLAGS})

@@ -54,6 +54,36 @@
  */
 #define U_PORT_UART_EVENT_MIN_TASK_STACK_SIZE_BYTES 768
 
+/** Size of the TX ring buffer given to uart_driver_install(). Previously
+ * this was 0 ("blocking transmit" straight against the HW FIFO): with no
+ * ring buffer, uart_write_bytes() can block for however long it takes the
+ * far end to drain its RX (via xRingbufferSend(..., portMAX_DELAY) deep in
+ * the ESP-IDF driver), and since uPortUartWrite() holds gMutex - the same
+ * mutex guarding the UART *read* path - for the whole call, a slow-draining
+ * far end (e.g. a GNSS receiver busy processing a burst of RTCM) can starve
+ * incoming position messages for as long as that write is stuck. A real TX
+ * ring buffer lets uPortUartWrite() check available room up front and wait
+ * with a bounded timeout instead of an unbounded one (Bug fix: see
+ * U_PORT_UART_WRITE_TIMEOUT_MS below). Must be 0 or > the HW FIFO length
+ * (128 bytes on ESP32-S3); sized above the largest single write this port
+ * needs to make in one call to uPortUartWrite() - the biggest is one RTCM3
+ * frame (preamble + 2-byte length + up to 1023-byte payload + 3-byte CRC =
+ * 1029 bytes max per the RTCM3 spec), since task_gps.c injects one frame
+ * per call. uart_get_tx_buffer_free_size() must see the whole write's worth
+ * of space at once (the wait loop below doesn't split a write into partial
+ * chunks), so this must stay >= that 1029-byte worst case.
+ */
+#ifndef U_PORT_UART_TX_BUFFER_SIZE_BYTES
+# define U_PORT_UART_TX_BUFFER_SIZE_BYTES 2048
+#endif
+
+/** How long uPortUartWrite() will wait for enough TX ring buffer space to
+ * become available before giving up, rather than blocking indefinitely.
+ */
+#ifndef U_PORT_UART_WRITE_TIMEOUT_MS
+# define U_PORT_UART_WRITE_TIMEOUT_MS 300
+#endif
+
 /* ----------------------------------------------------------------
  * TYPES
  * -------------------------------------------------------------- */
@@ -330,10 +360,13 @@ int32_t uPortUartOpen(int32_t uart, int32_t baudRate,
                     // Switch off SW flow control
                     espError = uart_set_sw_flow_ctrl(uart, false, 0, 0);
                     if (espError == ESP_OK) {
-                        // Install the driver
+                        // Install the driver. A non-zero TX buffer (rather
+                        // than "blocking transmit") lets uPortUartWrite()
+                        // bound how long it can stall the shared UART mutex
+                        // for - see U_PORT_UART_TX_BUFFER_SIZE_BYTES.
                         espError = uart_driver_install(uart,
                                                        receiveBufferSizeBytes,
-                                                       0, /* Blocking transmit */
+                                                       U_PORT_UART_TX_BUFFER_SIZE_BYTES,
                                                        U_PORT_UART_EVENT_QUEUE_SIZE,
                                                        &gUartData[uart].queue,
                                                        0);
@@ -455,7 +488,6 @@ int32_t uPortUartWrite(int32_t handle,
             (handle < sizeof(gUartData) / sizeof(gUartData[0])) &&
             !gUartData[handle].markedForDeletion) {
 
-            // Will get back either size or -1
             // Hint when debugging: if your code stops dead here
             // it is because the CTS line of this MCU's UART HW
             // is floating high, stopping the UART from
@@ -464,11 +496,39 @@ int32_t uPortUartWrite(int32_t handle,
             // it or the CTS pin when configuring this UART
             // was wrong and it's not connected to the right
             // thing.
-            sizeOrErrorCode = uart_write_bytes(handle,
-                                               (const char *) pBuffer,
-                                               sizeBytes);
-            if (sizeOrErrorCode < 0) {
-                sizeOrErrorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
+            //
+            // uart_write_bytes() itself blocks indefinitely
+            // (xRingbufferSend(..., portMAX_DELAY) deep inside the
+            // ESP-IDF driver) once the TX ring buffer is full, and
+            // gMutex is held for the whole call - starving the UART
+            // *read* path (which shares this same mutex) for however
+            // long that takes. Wait here instead, with a bounded
+            // timeout, for enough room to be free before calling
+            // uart_write_bytes(); if it never frees up in time, give
+            // up rather than block this mutex forever (Bug fix: was
+            // an unconditional uart_write_bytes() call with no bound
+            // on how long it could stall).
+            size_t freeBytes = 0;
+            uTimeoutStart_t timeoutStart = uTimeoutStart();
+            while ((uart_get_tx_buffer_free_size(handle, &freeBytes) == ESP_OK) &&
+                   (freeBytes < sizeBytes) &&
+                   !uTimeoutExpiredMs(timeoutStart, U_PORT_UART_WRITE_TIMEOUT_MS)) {
+                uPortTaskBlock(U_CFG_OS_YIELD_MS);
+            }
+
+            if (freeBytes >= sizeBytes) {
+                // Will get back either size or -1
+                sizeOrErrorCode = uart_write_bytes(handle,
+                                                   (const char *) pBuffer,
+                                                   sizeBytes);
+                if (sizeOrErrorCode < 0) {
+                    sizeOrErrorCode = (int32_t) U_ERROR_COMMON_PLATFORM;
+                }
+            } else {
+                // Ran out of time waiting for TX room: the far end is
+                // not draining fast enough, don't block the shared
+                // UART mutex any longer for it.
+                sizeOrErrorCode = (int32_t) U_ERROR_COMMON_TIMEOUT;
             }
         }
 
